@@ -1,41 +1,9 @@
 
-import React, { useState, useEffect } from 'react';
-import { 
-  ResponsiveContainer, 
-  LineChart, 
-  Line, 
-  XAxis, 
-  YAxis, 
-  CartesianGrid, 
-  Tooltip, 
-  Legend,
-  AreaChart,
-  Area
-} from 'recharts';
+import React, { useState, useEffect, useRef } from 'react';
 import { useToast } from '@/hooks/use-toast';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-
-// Mock data - in a real app this would come from a forex API
-const generateMockData = (count: number) => {
-  const data = [];
-  let basePrice = 1.2000; // Starting price for EUR/USD
-  
-  for (let i = 0; i < count; i++) {
-    const price = basePrice + (Math.random() * 0.01 - 0.005);
-    basePrice = price;
-    
-    data.push({
-      time: new Date(Date.now() - (count - i) * 30000).toLocaleTimeString(),
-      price: price.toFixed(5),
-      volume: Math.floor(Math.random() * 100) + 50,
-      ma: (price + (Math.random() * 0.001 - 0.0005)).toFixed(5)
-    });
-  }
-  
-  return data;
-};
 
 const currencyPairs = [
   { value: 'EURUSD', label: 'EUR/USD' },
@@ -45,45 +13,99 @@ const currencyPairs = [
 ];
 
 const timeframes = [
-  { value: '1m', label: '1 Minute' },
-  { value: '5m', label: '5 Minutes' },
-  { value: '15m', label: '15 Minutes' },
-  { value: '1h', label: '1 Hour' },
-  { value: '4h', label: '4 Hours' },
-  { value: '1d', label: 'Daily' },
+  { value: '1', label: '1 Minute' },
+  { value: '5', label: '5 Minutes' },
+  { value: '15', label: '15 Minutes' },
+  { value: '60', label: '1 Hour' },
+  { value: '240', label: '4 Hours' },
+  { value: 'D', label: 'Daily' },
 ];
 
+interface TradingViewProps {
+  symbol: string;
+  interval: string;
+  timezone?: string;
+  theme?: string;
+  style?: string;
+  locale?: string;
+  toolbar_bg?: string;
+  enable_publishing?: boolean;
+  allow_symbol_change?: boolean;
+  container_id: string;
+}
+
+declare global {
+  interface Window {
+    TradingView: {
+      widget: new (config: TradingViewProps) => any;
+    };
+  }
+}
+
 const ForexChart = () => {
-  const [chartData, setChartData] = useState<any[]>([]);
   const [currencyPair, setCurrencyPair] = useState('EURUSD');
-  const [timeframe, setTimeframe] = useState('5m');
-  const [chartType, setChartType] = useState('candlestick');
+  const [timeframe, setTimeframe] = useState('60');
+  const containerRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
+  const chartContainerId = 'tradingview_widget';
+  const [widgetInstance, setWidgetInstance] = useState<any>(null);
   
   useEffect(() => {
-    // In a real app, this would fetch data from a forex API
-    setChartData(generateMockData(50));
-    
-    const interval = setInterval(() => {
-      setChartData(prevData => {
-        const newData = [...prevData];
-        const lastPrice = parseFloat(newData[newData.length - 1].price);
-        const newPrice = lastPrice + (Math.random() * 0.002 - 0.001);
-        
-        newData.shift();
-        newData.push({
-          time: new Date().toLocaleTimeString(),
-          price: newPrice.toFixed(5),
-          volume: Math.floor(Math.random() * 100) + 50,
-          ma: (newPrice + (Math.random() * 0.001 - 0.0005)).toFixed(5)
-        });
-        
-        return newData;
+    // Load TradingView script
+    const script = document.createElement('script');
+    script.src = 'https://s3.tradingview.com/tv.js';
+    script.async = true;
+    script.onload = initializeWidget;
+    document.head.appendChild(script);
+
+    return () => {
+      if (document.getElementById('tradingview-widget-script')) {
+        document.getElementById('tradingview-widget-script')?.remove();
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (window.TradingView && containerRef.current) {
+      // If the widget was already initialized and we're changing currency pair or timeframe
+      if (widgetInstance) {
+        // Remove old widget
+        while (containerRef.current.firstChild) {
+          containerRef.current.removeChild(containerRef.current.firstChild);
+        }
+      }
+      
+      // Create new container
+      const container = document.createElement('div');
+      container.id = chartContainerId;
+      container.style.height = '400px';
+      container.style.width = '100%';
+      containerRef.current.appendChild(container);
+      
+      // Create new widget
+      const widget = new window.TradingView.widget({
+        symbol: `FX:${currencyPair}`,
+        interval: timeframe,
+        timezone: "Etc/UTC",
+        theme: "dark",
+        style: "1",
+        locale: "en",
+        toolbar_bg: "#f1f3f6",
+        enable_publishing: false,
+        allow_symbol_change: true,
+        container_id: chartContainerId
       });
-    }, 3000);
-    
-    return () => clearInterval(interval);
-  }, [currencyPair, timeframe]);
+      
+      setWidgetInstance(widget);
+    }
+  }, [currencyPair, timeframe, window.TradingView]);
+
+  const initializeWidget = () => {
+    if (window.TradingView && containerRef.current) {
+      // Force update to trigger the widget initialization
+      setCurrencyPair(prev => prev);
+    }
+  };
   
   const handlePairChange = (value: string) => {
     setCurrencyPair(value);
@@ -92,7 +114,6 @@ const ForexChart = () => {
       description: `Now viewing ${value.slice(0, 3)}/${value.slice(3)}`,
       duration: 2000,
     });
-    setChartData(generateMockData(50));
   };
   
   return (
@@ -129,70 +150,8 @@ const ForexChart = () => {
         </div>
       </div>
       
-      <Tabs defaultValue="line" className="mb-4" onValueChange={(value) => setChartType(value)}>
-        <TabsList className="grid w-full max-w-md grid-cols-2">
-          <TabsTrigger value="line">Line</TabsTrigger>
-          <TabsTrigger value="area">Area</TabsTrigger>
-        </TabsList>
-      </Tabs>
-      
-      <div className="chart-container">
-        <ResponsiveContainer width="100%" height={400}>
-          {chartType === 'line' ? (
-            <LineChart data={chartData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
-              <XAxis dataKey="time" stroke="#888" />
-              <YAxis 
-                domain={['auto', 'auto']} 
-                stroke="#888" 
-                tickFormatter={(value) => value.toFixed(4)}
-              />
-              <Tooltip 
-                contentStyle={{ backgroundColor: 'rgba(15, 23, 42, 0.9)', borderColor: '#334155' }} 
-                labelStyle={{ color: '#e2e8f0' }}
-                formatter={(value) => [`${value}`, 'Price']}
-              />
-              <Legend />
-              <Line 
-                type="monotone" 
-                dataKey="price" 
-                stroke="hsl(var(--primary))" 
-                activeDot={{ r: 8 }} 
-                strokeWidth={2} 
-                dot={false}
-              />
-              <Line 
-                type="monotone" 
-                dataKey="ma" 
-                stroke="hsl(var(--destructive))" 
-                strokeWidth={1.5} 
-                dot={false} 
-                strokeDasharray="5 5"
-              />
-            </LineChart>
-          ) : (
-            <AreaChart data={chartData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
-              <XAxis dataKey="time" stroke="#888" />
-              <YAxis 
-                domain={['auto', 'auto']} 
-                stroke="#888" 
-                tickFormatter={(value) => value.toFixed(4)}
-              />
-              <Tooltip 
-                contentStyle={{ backgroundColor: 'rgba(15, 23, 42, 0.9)', borderColor: '#334155' }} 
-                labelStyle={{ color: '#e2e8f0' }}
-              />
-              <Area 
-                type="monotone" 
-                dataKey="price" 
-                stroke="hsl(var(--primary))" 
-                fill="hsla(var(--primary), 0.2)" 
-                activeDot={{ r: 6 }} 
-              />
-            </AreaChart>
-          )}
-        </ResponsiveContainer>
+      <div className="chart-container" ref={containerRef}>
+        {/* TradingView Chart will be rendered here */}
       </div>
       
       <div className="mt-4 flex flex-wrap gap-2">
