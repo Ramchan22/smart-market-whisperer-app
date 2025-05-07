@@ -29,6 +29,17 @@ export interface SMCPattern {
   pair: string;
 }
 
+// Define the standard currency pairs to use across all functions
+const CURRENCY_PAIRS = [
+  'EUR/USD', // Euro/US Dollar
+  'USD/JPY', // US Dollar/Japanese Yen
+  'GBP/USD', // British Pound/US Dollar
+  'AUD/USD', // Australian Dollar/US Dollar
+  'EUR/GBP', // Euro/British Pound
+  'EUR/CHF', // Euro/Swiss Franc
+  'GBP/JPY'  // British Pound/Japanese Yen
+];
+
 // Main API service for fetching market data
 export const marketDataService = {
   // Fetch current forex rates for watchlist
@@ -46,9 +57,6 @@ export const marketDataService = {
       // we'll transform the data to match our desired format
       // In production, you would loop through multiple currency pairs
       
-      // For the demo, create a few pairs with realistic data based on the EUR/USD rate
-      const pairs = ['EUR/USD', 'GBP/USD', 'USD/JPY', 'AUD/USD', 'USD/CAD'];
-      
       // Get the EUR/USD rate if available, or use a fallback
       let baseRate = 1.08;
       if (data['Realtime Currency Exchange Rate']) {
@@ -58,7 +66,7 @@ export const marketDataService = {
       const rates: ForexRate[] = [];
       
       // Generate realistic rates for other pairs based on typical spreads and relationships
-      pairs.forEach(pair => {
+      CURRENCY_PAIRS.forEach(pair => {
         let bid = 0;
         let ask = 0;
         let change = (Math.random() * 0.2 - 0.1).toFixed(2); // Random change between -0.1% and +0.1%
@@ -76,9 +84,15 @@ export const marketDataService = {
         } else if (pair === 'AUD/USD') {
           bid = baseRate * 0.6; // AUD typically lower than EUR
           ask = bid + 0.0002; // 2 pip spread
-        } else if (pair === 'USD/CAD') {
-          bid = 1 / baseRate * 1.35; // USD/CAD calculation
+        } else if (pair === 'EUR/GBP') {
+          bid = baseRate * 0.85; // EUR/GBP calculation
+          ask = bid + 0.0002; // 2 pip spread
+        } else if (pair === 'EUR/CHF') {
+          bid = baseRate * 0.95; // EUR/CHF calculation
           ask = bid + 0.0003; // 3 pip spread
+        } else if (pair === 'GBP/JPY') {
+          bid = baseRate * 1.17 * 148; // GBP/JPY calculation
+          ask = bid + 0.03; // 3 pip spread for JPY pairs
         }
         
         rates.push({
@@ -130,7 +144,6 @@ export const marketDataService = {
       // Generate signals based on real market data
       const patterns = ['Order Block', 'Fair Value Gap', 'Liquidity Grab', 'Breaker Block', 'Imbalance'];
       const timeframes = ['15m', '1H', '4H', '1D'];
-      const pairs = ['EUR/USD', 'GBP/USD', 'USD/JPY', 'AUD/USD', 'USD/CAD'];
       
       // Generate 3-5 signals
       const signalCount = Math.floor(Math.random() * 3) + 3;
@@ -138,7 +151,7 @@ export const marketDataService = {
       
       for (let i = 1; i <= signalCount; i++) {
         // Use random but realistic price levels based on the current EUR/USD price
-        const pair = pairs[Math.floor(Math.random() * pairs.length)];
+        const pair = CURRENCY_PAIRS[Math.floor(Math.random() * CURRENCY_PAIRS.length)];
         const direction = Math.random() > 0.5 ? trend : (trend === 'buy' ? 'sell' : 'buy');
         
         // Calculate realistic price levels
@@ -146,7 +159,9 @@ export const marketDataService = {
         if (pair === 'GBP/USD') basePrice *= 1.17;
         else if (pair === 'USD/JPY') basePrice *= 148;
         else if (pair === 'AUD/USD') basePrice *= 0.6;
-        else if (pair === 'USD/CAD') basePrice = 1 / basePrice * 1.35;
+        else if (pair === 'EUR/GBP') basePrice *= 0.85;
+        else if (pair === 'EUR/CHF') basePrice *= 0.95;
+        else if (pair === 'GBP/JPY') basePrice = basePrice * 1.17 * 148;
         
         const entry = basePrice.toFixed(pair.includes('JPY') ? 2 : 4);
         const stopLoss = direction === 'buy' 
@@ -207,7 +222,6 @@ export const marketDataService = {
       };
       
       const patternNames = Object.keys(patternDescriptions);
-      const pairs = ['EUR/USD', 'GBP/USD', 'USD/JPY', 'AUD/USD', 'USD/CAD', 'NZD/USD'];
       const statuses = ['Detected', 'Pending', 'Active', 'Watching'];
       
       // Generate 4-6 patterns based on the latest market data
@@ -238,7 +252,7 @@ export const marketDataService = {
       
       for (let i = 0; i < patternCount; i++) {
         const patternName = shuffledPatterns[i % shuffledPatterns.length];
-        const pair = pairs[Math.floor(Math.random() * pairs.length)];
+        const pair = CURRENCY_PAIRS[Math.floor(Math.random() * CURRENCY_PAIRS.length)];
         const status = statuses[Math.floor(Math.random() * statuses.length)];
         
         selectedPatterns.push({

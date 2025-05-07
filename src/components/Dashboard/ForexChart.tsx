@@ -7,9 +7,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 const currencyPairs = [
   { value: 'EURUSD', label: 'EUR/USD' },
-  { value: 'GBPUSD', label: 'GBP/USD' },
   { value: 'USDJPY', label: 'USD/JPY' },
+  { value: 'GBPUSD', label: 'GBP/USD' },
   { value: 'AUDUSD', label: 'AUD/USD' },
+  { value: 'EURGBP', label: 'EUR/GBP' },
+  { value: 'EURCHF', label: 'EUR/CHF' },
+  { value: 'GBPJPY', label: 'GBP/JPY' },
 ];
 
 const timeframes = [
