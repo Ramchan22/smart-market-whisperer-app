@@ -3,60 +3,11 @@ import React, { useState, useEffect } from 'react';
 import { Separator } from '@/components/ui/separator';
 import { ArrowUpRight, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-
-interface PatternData {
-  name: string; 
-  description: string;
-  status: 'Detected' | 'Pending' | 'Active' | 'Watching';
-  pair: string;
-}
-
-// Mock API function - In a real app, this would connect to a backend API
-// that analyzes TradingView charts for SMC patterns
-const fetchPatternData = async (): Promise<PatternData[]> => {
-  // Simulate API call delay
-  await new Promise(resolve => setTimeout(resolve, 1200));
-  
-  // Dynamic pattern descriptions
-  const patternDescriptions = {
-    'Order Block': 'Areas where smart money placed their positions, causing market movement',
-    'Fair Value Gap': 'Imbalances created by quick moves, often filling liquidity',
-    'Liquidity Sweep': 'Price moves breaking key levels to collect stops before reversing',
-    'Breaker Block': 'Area where price previously reversed acting as S/R',
-    'Equal Highs/Lows': 'Areas where price creates equal peaks before reversing',
-    'Market Structure Break': 'Key level where market structure shifts direction',
-    'Discount Block': 'Premium zones where smart money accumulates positions'
-  };
-  
-  const patternNames = Object.keys(patternDescriptions);
-  const pairs = ['EUR/USD', 'GBP/USD', 'USD/JPY', 'AUD/USD', 'USD/CAD', 'NZD/USD'];
-  const statuses = ['Detected', 'Pending', 'Active', 'Watching'];
-  
-  // Select 4-6 random patterns
-  const patternCount = Math.floor(Math.random() * 3) + 4;
-  const selectedPatterns = [];
-  
-  // Randomly shuffle pattern names
-  const shuffledPatterns = [...patternNames].sort(() => Math.random() - 0.5);
-  
-  for (let i = 0; i < patternCount; i++) {
-    const patternName = shuffledPatterns[i % shuffledPatterns.length];
-    const pair = pairs[Math.floor(Math.random() * pairs.length)];
-    const status = statuses[Math.floor(Math.random() * statuses.length)];
-    
-    selectedPatterns.push({
-      name: patternName,
-      description: patternDescriptions[patternName as keyof typeof patternDescriptions],
-      status: status as 'Detected' | 'Pending' | 'Active' | 'Watching',
-      pair
-    });
-  }
-  
-  return selectedPatterns;
-};
+import { marketDataService, SMCPattern } from '@/services/marketDataService';
+import { toast } from 'sonner';
 
 const SMCPatterns = () => {
-  const [patterns, setPatterns] = useState<PatternData[]>([]);
+  const [patterns, setPatterns] = useState<SMCPattern[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   
@@ -65,11 +16,12 @@ const SMCPatterns = () => {
     setError(null);
     
     try {
-      const data = await fetchPatternData();
+      const data = await marketDataService.fetchSMCPatterns();
       setPatterns(data);
     } catch (err) {
       console.error('Error fetching pattern data:', err);
       setError('Failed to load pattern data. Please try again.');
+      toast.error('Failed to load SMC pattern data');
     } finally {
       setLoading(false);
     }

@@ -13,72 +13,8 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-
-// Interface for trade signals
-interface TradeSignal {
-  id: number;
-  pair: string;
-  direction: 'buy' | 'sell';
-  pattern: string;
-  entry: string;
-  stopLoss: string;
-  takeProfit: string;
-  probability: 'high' | 'medium' | 'low';
-  timeframe: string;
-}
-
-// Mock API function - In a real app, this would connect to a backend API
-// that processes TradingView data and generates SMC-based trade signals
-const fetchTradeSignals = async (): Promise<TradeSignal[]> => {
-  // Simulate API call delay
-  await new Promise(resolve => setTimeout(resolve, 1500));
-  
-  // For now, we'll generate dynamic but mock data that simulates real trades
-  // In a real implementation, this would come from your backend API processing TradingView data
-  const pairs = ['EUR/USD', 'GBP/USD', 'USD/JPY', 'AUD/USD', 'USD/CAD'];
-  const patterns = ['Order Block', 'Fair Value Gap', 'Liquidity Grab', 'Breaker Block', 'Imbalance'];
-  const timeframes = ['15m', '1H', '4H', '1D'];
-  
-  const signals: TradeSignal[] = [];
-  
-  // Generate 3-5 random signals
-  const signalCount = Math.floor(Math.random() * 3) + 3;
-  
-  for (let i = 1; i <= signalCount; i++) {
-    const pair = pairs[Math.floor(Math.random() * pairs.length)];
-    const direction = Math.random() > 0.5 ? 'buy' : 'sell';
-    
-    // Generate realistic prices
-    let basePrice = 0;
-    if (pair === 'EUR/USD') basePrice = 1.09 + (Math.random() * 0.02);
-    else if (pair === 'GBP/USD') basePrice = 1.26 + (Math.random() * 0.02);
-    else if (pair === 'USD/JPY') basePrice = 149 + (Math.random() * 2);
-    else if (pair === 'AUD/USD') basePrice = 0.65 + (Math.random() * 0.02);
-    else if (pair === 'USD/CAD') basePrice = 1.36 + (Math.random() * 0.02);
-    
-    const entry = basePrice.toFixed(pair.includes('JPY') ? 2 : 4);
-    const stopLoss = direction === 'buy' 
-      ? (basePrice - (basePrice * 0.003)).toFixed(pair.includes('JPY') ? 2 : 4)
-      : (basePrice + (basePrice * 0.003)).toFixed(pair.includes('JPY') ? 2 : 4);
-    const takeProfit = direction === 'buy'
-      ? (basePrice + (basePrice * 0.006)).toFixed(pair.includes('JPY') ? 2 : 4)
-      : (basePrice - (basePrice * 0.006)).toFixed(pair.includes('JPY') ? 2 : 4);
-    
-    signals.push({
-      id: i,
-      pair,
-      direction,
-      pattern: patterns[Math.floor(Math.random() * patterns.length)],
-      entry,
-      stopLoss,
-      takeProfit,
-      probability: ['high', 'medium', 'low'][Math.floor(Math.random() * 3)] as 'high' | 'medium' | 'low',
-      timeframe: timeframes[Math.floor(Math.random() * timeframes.length)]
-    });
-  }
-  
-  return signals;
-};
+import { marketDataService, TradeSignal } from '@/services/marketDataService';
+import { toast } from 'sonner';
 
 const TradeSuggestions = () => {
   const [tradeSuggestions, setTradeSuggestions] = useState<TradeSignal[]>([]);
@@ -95,25 +31,28 @@ const TradeSuggestions = () => {
     medium: true,
     low: true,
   });
-  const { toast } = useToast();
+  const { toast: useToastHook } = useToast();
   
   const loadTradeSignals = async () => {
     setLoading(true);
     setError(null);
     
     try {
-      const signals = await fetchTradeSignals();
+      const signals = await marketDataService.fetchTradeSignals();
       setTradeSuggestions(signals);
       applyFilters(signals, currencyPairFilter, probabilityFilter);
-      toast({
+      useToastHook({
         title: "Trade Signals Updated",
         description: `Found ${signals.length} potential trading opportunities.`,
         duration: 3000,
       });
+      
+      // Also show in sonner toast
+      toast.success(`Found ${signals.length} potential trading opportunities.`);
     } catch (err) {
       console.error('Error fetching trade signals:', err);
       setError('Failed to load trade signals. Please try again.');
-      toast({
+      useToastHook({
         title: "Error",
         description: "Failed to load trade signals. Please try again.",
         variant: "destructive",
