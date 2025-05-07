@@ -191,14 +191,14 @@ const TradeSuggestions = () => {
               <DropdownMenuSeparator />
               <div className="p-2">
                 <Select 
-                  value={currencyPairFilter || ''} 
-                  onValueChange={(value) => setCurrencyPairFilter(value || null)}
+                  value={currencyPairFilter || 'all-pairs'} 
+                  onValueChange={(value) => setCurrencyPairFilter(value === 'all-pairs' ? null : value)}
                 >
                   <SelectTrigger className="w-full">
                     <SelectValue placeholder="All Pairs" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">All Pairs</SelectItem>
+                    <SelectItem value="all-pairs">All Pairs</SelectItem>
                     {uniquePairs.map(pair => (
                       <SelectItem key={pair} value={pair}>{pair}</SelectItem>
                     ))}
