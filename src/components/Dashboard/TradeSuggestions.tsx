@@ -74,7 +74,7 @@ const TradeSuggestions = () => {
   useEffect(() => {
     // Apply filters whenever they change
     applyFilters(tradeSuggestions, currencyPairFilter, probabilityFilter);
-  }, [currencyPairFilter, probabilityFilter]);
+  }, [currencyPairFilter, probabilityFilter, tradeSuggestions]);
   
   // Extract unique currency pairs from trade suggestions
   const uniquePairs = Array.from(new Set(tradeSuggestions.map(signal => signal.pair)));
@@ -92,8 +92,11 @@ const TradeSuggestions = () => {
       filtered = filtered.filter(signal => signal.pair === pairFilter);
     }
     
-    // Apply probability filters
-    filtered = filtered.filter(signal => probFilter[signal.probability]);
+    // Apply probability filters - only show signals where the probability type is true in the filter
+    filtered = filtered.filter(signal => {
+      // Check if the signal's probability (high, medium, or low) is true in the probFilter
+      return probFilter[signal.probability];
+    });
     
     setFilteredSuggestions(filtered);
   };
@@ -112,6 +115,9 @@ const TradeSuggestions = () => {
     setCurrencyPairFilter(null);
     setProbabilityFilter({ high: true, medium: true, low: true });
   };
+  
+  // Check if at least one probability filter is active
+  const hasProbabilityFilter = probabilityFilter.high || probabilityFilter.medium || probabilityFilter.low;
   
   return (
     <div className="bg-card rounded-lg p-4 shadow-md h-full">
@@ -207,7 +213,7 @@ const TradeSuggestions = () => {
       )}
       
       {/* Show active filters if any */}
-      {(currencyPairFilter || !Object.values(probabilityFilter).every(v => v)) && (
+      {(currencyPairFilter || !hasProbabilityFilter || (hasProbabilityFilter && (!probabilityFilter.high || !probabilityFilter.medium || !probabilityFilter.low))) && (
         <div className="flex flex-wrap gap-1 mb-3">
           {currencyPairFilter && (
             <Badge variant="outline" className="flex items-center gap-1">
@@ -220,19 +226,32 @@ const TradeSuggestions = () => {
               </button>
             </Badge>
           )}
-          {!probabilityFilter.high && !probabilityFilter.medium && !probabilityFilter.low && (
+          {!hasProbabilityFilter && (
             <Badge variant="outline" className="bg-destructive/10 text-destructive">
               No probability filters selected
             </Badge>
           )}
-          {probabilityFilter.high && !probabilityFilter.medium && !probabilityFilter.low && (
-            <Badge variant="outline">High probability only</Badge>
-          )}
-          {!probabilityFilter.high && probabilityFilter.medium && !probabilityFilter.low && (
-            <Badge variant="outline">Medium probability only</Badge>
-          )}
-          {!probabilityFilter.high && !probabilityFilter.medium && probabilityFilter.low && (
-            <Badge variant="outline">Low probability only</Badge>
+          {hasProbabilityFilter && (
+            <>
+              {probabilityFilter.high && !probabilityFilter.medium && !probabilityFilter.low && (
+                <Badge variant="outline">High probability only</Badge>
+              )}
+              {!probabilityFilter.high && probabilityFilter.medium && !probabilityFilter.low && (
+                <Badge variant="outline">Medium probability only</Badge>
+              )}
+              {!probabilityFilter.high && !probabilityFilter.medium && probabilityFilter.low && (
+                <Badge variant="outline">Low probability only</Badge>
+              )}
+              {probabilityFilter.high && probabilityFilter.medium && !probabilityFilter.low && (
+                <Badge variant="outline">High & Medium probability</Badge>
+              )}
+              {probabilityFilter.high && !probabilityFilter.medium && probabilityFilter.low && (
+                <Badge variant="outline">High & Low probability</Badge>
+              )}
+              {!probabilityFilter.high && probabilityFilter.medium && probabilityFilter.low && (
+                <Badge variant="outline">Medium & Low probability</Badge>
+              )}
+            </>
           )}
         </div>
       )}
