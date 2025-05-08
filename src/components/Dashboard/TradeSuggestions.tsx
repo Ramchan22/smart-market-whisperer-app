@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { TrendingUp, TrendingDown, ChartBar, ArrowRight, Loader2, Filter, Check } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
@@ -47,6 +48,16 @@ const TradeSuggestions = () => {
   const [probabilityPopoverOpen, setProbabilityPopoverOpen] = useState(false);
   
   const { toast: useToastHook } = useToast();
+  
+  // Helper function to get numerical priority for probability (for sorting)
+  const getProbabilityPriority = (probability: string): number => {
+    switch (probability) {
+      case 'high': return 1;
+      case 'medium': return 2;
+      case 'low': return 3;
+      default: return 4; // For any other value (shouldn't happen)
+    }
+  };
   
   const loadTradeSignals = async () => {
     setLoading(true);
@@ -111,6 +122,11 @@ const TradeSuggestions = () => {
     filtered = filtered.filter(signal => {
       // Check if the signal's probability (high, medium, or low) is true in the probFilter
       return probFilter[signal.probability];
+    });
+    
+    // Sort by probability: high, then medium, then low
+    filtered.sort((a, b) => {
+      return getProbabilityPriority(a.probability) - getProbabilityPriority(b.probability);
     });
     
     setFilteredSuggestions(filtered);
