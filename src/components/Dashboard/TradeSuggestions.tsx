@@ -1,6 +1,5 @@
-
 import React, { useState, useEffect } from 'react';
-import { TrendingUp, TrendingDown, ChartBar, ArrowRight, Loader2, Filter } from 'lucide-react';
+import { TrendingUp, TrendingDown, ChartBar, ArrowRight, Loader2, Filter, Check } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
@@ -13,6 +12,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { marketDataService, TradeSignal } from '@/services/marketDataService';
 import { toast } from 'sonner';
 
@@ -31,6 +31,21 @@ const TradeSuggestions = () => {
     medium: true,
     low: true,
   });
+  
+  // Temporary probability filter state for the popover
+  const [tempProbabilityFilter, setTempProbabilityFilter] = useState<{
+    high: boolean;
+    medium: boolean;
+    low: boolean;
+  }>({
+    high: true,
+    medium: true,
+    low: true,
+  });
+  
+  // State to control the open/close state of the probability filter popover
+  const [probabilityPopoverOpen, setProbabilityPopoverOpen] = useState(false);
+  
   const { toast: useToastHook } = useToast();
   
   const loadTradeSignals = async () => {
@@ -101,19 +116,35 @@ const TradeSuggestions = () => {
     setFilteredSuggestions(filtered);
   };
   
-  // Handle probability filter change
-  const toggleProbabilityFilter = (value: 'high' | 'medium' | 'low') => {
-    const updatedFilter = {
-      ...probabilityFilter,
-      [value]: !probabilityFilter[value]
-    };
-    setProbabilityFilter(updatedFilter);
+  // Handle temporary probability filter change
+  const toggleTempProbabilityFilter = (value: 'high' | 'medium' | 'low') => {
+    setTempProbabilityFilter(prev => ({
+      ...prev,
+      [value]: !prev[value]
+    }));
+  };
+  
+  // Apply the temporary probability filter
+  const applyProbabilityFilter = () => {
+    setProbabilityFilter({...tempProbabilityFilter});
+    setProbabilityPopoverOpen(false);
   };
   
   // Clear all filters
   const clearFilters = () => {
+    const defaultFilters = { high: true, medium: true, low: true };
     setCurrencyPairFilter(null);
-    setProbabilityFilter({ high: true, medium: true, low: true });
+    setProbabilityFilter(defaultFilters);
+    setTempProbabilityFilter(defaultFilters);
+    toast.success("Filters have been reset");
+  };
+  
+  // Initialize temp filter when popover opens
+  const handlePopoverOpen = (open: boolean) => {
+    if (open) {
+      setTempProbabilityFilter({...probabilityFilter});
+    }
+    setProbabilityPopoverOpen(open);
   };
   
   // Check if at least one probability filter is active
@@ -153,24 +184,80 @@ const TradeSuggestions = () => {
               
               <DropdownMenuLabel>Probability</DropdownMenuLabel>
               <DropdownMenuSeparator />
-              <DropdownMenuCheckboxItem
-                checked={probabilityFilter.high}
-                onCheckedChange={() => toggleProbabilityFilter('high')}
-              >
-                High
-              </DropdownMenuCheckboxItem>
-              <DropdownMenuCheckboxItem
-                checked={probabilityFilter.medium}
-                onCheckedChange={() => toggleProbabilityFilter('medium')}
-              >
-                Medium
-              </DropdownMenuCheckboxItem>
-              <DropdownMenuCheckboxItem
-                checked={probabilityFilter.low}
-                onCheckedChange={() => toggleProbabilityFilter('low')}
-              >
-                Low
-              </DropdownMenuCheckboxItem>
+              
+              {/* Replace the direct checkbox items with a button that opens a popover */}
+              <div className="p-2">
+                <Popover open={probabilityPopoverOpen} onOpenChange={handlePopoverOpen}>
+                  <PopoverTrigger asChild>
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      className="w-full flex justify-between"
+                    >
+                      Probability Options
+                      <Filter className="h-3.5 w-3.5 ml-2" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-56 p-2" align="start">
+                    <div className="space-y-2">
+                      <div className="font-medium text-sm mb-2">Select Probability</div>
+                      
+                      <div className="flex items-center space-x-2">
+                        <div 
+                          className={`border rounded-md p-1.5 cursor-pointer ${
+                            tempProbabilityFilter.high 
+                              ? 'bg-primary text-primary-foreground border-primary' 
+                              : 'border-input'
+                          }`}
+                          onClick={() => toggleTempProbabilityFilter('high')}
+                        >
+                          {tempProbabilityFilter.high && <Check className="h-3.5 w-3.5" />}
+                        </div>
+                        <span>High</span>
+                      </div>
+                      
+                      <div className="flex items-center space-x-2">
+                        <div 
+                          className={`border rounded-md p-1.5 cursor-pointer ${
+                            tempProbabilityFilter.medium 
+                              ? 'bg-primary text-primary-foreground border-primary' 
+                              : 'border-input'
+                          }`}
+                          onClick={() => toggleTempProbabilityFilter('medium')}
+                        >
+                          {tempProbabilityFilter.medium && <Check className="h-3.5 w-3.5" />}
+                        </div>
+                        <span>Medium</span>
+                      </div>
+                      
+                      <div className="flex items-center space-x-2">
+                        <div 
+                          className={`border rounded-md p-1.5 cursor-pointer ${
+                            tempProbabilityFilter.low 
+                              ? 'bg-primary text-primary-foreground border-primary' 
+                              : 'border-input'
+                          }`}
+                          onClick={() => toggleTempProbabilityFilter('low')}
+                        >
+                          {tempProbabilityFilter.low && <Check className="h-3.5 w-3.5" />}
+                        </div>
+                        <span>Low</span>
+                      </div>
+                      
+                      <div className="pt-2">
+                        <Button 
+                          className="w-full" 
+                          size="sm"
+                          onClick={applyProbabilityFilter}
+                        >
+                          Apply Filters
+                        </Button>
+                      </div>
+                    </div>
+                  </PopoverContent>
+                </Popover>
+              </div>
+              
               <DropdownMenuSeparator />
               <div className="p-2">
                 <Button 
