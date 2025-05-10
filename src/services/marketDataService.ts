@@ -1,6 +1,12 @@
 
 import { toast } from 'sonner';
 
+// API configuration
+const API_CONFIG = {
+  API_KEY: 'AP4TB68V97NKRA53', // Your Alpha Vantage API key
+  BASE_URL: 'https://www.alphavantage.co/query'
+};
+
 // API response types
 export interface ForexRate {
   pair: string;
@@ -72,64 +78,132 @@ export const marketDataService = {
   // Fetch current forex rates for watchlist
   fetchWatchlistData: async (): Promise<ForexRate[]> => {
     try {
-      // Using Alpha Vantage free Forex API - you'll need to replace with your preferred provider
-      const response = await fetch('https://www.alphavantage.co/query?function=CURRENCY_EXCHANGE_RATE&from_currency=EUR&to_currency=USD&apikey=demo');
-      const data = await response.json();
-      
-      if (data['Error Message']) {
-        throw new Error(data['Error Message']);
-      }
-
-      // Since we're using the demo API which returns just one pair,
-      // we'll transform the data to match our desired format
-      // In production, you would loop through multiple currency pairs
-      
-      // Get the EUR/USD rate if available, or use a fallback
-      let baseRate = 1.08;
-      if (data['Realtime Currency Exchange Rate']) {
-        baseRate = parseFloat(data['Realtime Currency Exchange Rate']['5. Exchange Rate']);
-      }
-      
       const rates: ForexRate[] = [];
+      let baseEURUSD = 0;
       
-      // Generate realistic rates for other pairs based on typical spreads and relationships
-      CURRENCY_PAIRS.forEach(pair => {
-        let bid = 0;
-        let ask = 0;
-        let change = (Math.random() * 0.2 - 0.1).toFixed(2); // Random change between -0.1% and +0.1%
-        let changeDirection: 'up' | 'down' = parseFloat(change) >= 0 ? 'up' : 'down';
+      // Fetch actual EUR/USD rate first as our baseline
+      const eurUsdResponse = await fetch(`${API_CONFIG.BASE_URL}?function=CURRENCY_EXCHANGE_RATE&from_currency=EUR&to_currency=USD&apikey=${API_CONFIG.API_KEY}`);
+      const eurUsdData = await eurUsdResponse.json();
+      
+      console.log('EUR/USD API response:', eurUsdData);
+      
+      if (eurUsdData['Realtime Currency Exchange Rate']) {
+        baseEURUSD = parseFloat(eurUsdData['Realtime Currency Exchange Rate']['5. Exchange Rate']);
         
-        if (pair === 'EUR/USD') {
-          bid = baseRate;
-          ask = baseRate + 0.0002; // 2 pip spread
-        } else if (pair === 'GBP/USD') {
-          bid = baseRate * 1.17; // GBP typically higher than EUR
-          ask = bid + 0.0003; // 3 pip spread
-        } else if (pair === 'USD/JPY') {
-          bid = baseRate * 148; // Typical USD/JPY rate
-          ask = bid + 0.02; // 2 pip spread for JPY
-        } else if (pair === 'AUD/USD') {
-          bid = baseRate * 0.6; // AUD typically lower than EUR
-          ask = bid + 0.0002; // 2 pip spread
-        } else if (pair === 'EUR/GBP') {
-          bid = baseRate * 0.85; // EUR/GBP calculation
-          ask = bid + 0.0002; // 2 pip spread
-        } else if (pair === 'EUR/CHF') {
-          bid = baseRate * 0.95; // EUR/CHF calculation
-          ask = bid + 0.0003; // 3 pip spread
-        } else if (pair === 'GBP/JPY') {
-          bid = baseRate * 1.17 * 148; // GBP/JPY calculation
-          ask = bid + 0.03; // 3 pip spread for JPY pairs
-        }
-        
+        // Add EUR/USD to our rates array
         rates.push({
-          pair,
-          bid: bid.toFixed(pair.includes('JPY') ? 2 : 4),
-          ask: ask.toFixed(pair.includes('JPY') ? 2 : 4),
-          change: `${changeDirection === 'up' ? '+' : ''}${change}%`,
-          changeDirection
+          pair: 'EUR/USD',
+          bid: (baseEURUSD - 0.0002).toFixed(4), // 2 pip spread
+          ask: baseEURUSD.toFixed(4),
+          change: ((Math.random() * 0.2 - 0.1)).toFixed(2) + '%',
+          changeDirection: Math.random() > 0.5 ? 'up' : 'down'
         });
-      });
+        
+        toast.success('Connected to live forex data');
+      } else if (eurUsdData['Information']) {
+        // Handle API limit message
+        console.warn('API Key Information:', eurUsdData['Information']);
+        toast.warning('API limit reached or key issue. Some data may be simulated.');
+        baseEURUSD = 1.12; // Fallback rate
+      } else if (eurUsdData['Error Message']) {
+        throw new Error(eurUsdData['Error Message']);
+      }
+      
+      // Now fetch other currency pairs if possible, or generate them based on typical relationships
+      // We'll fetch actual data for major pairs when possible, with fallbacks
+      
+      // Generate or fetch remaining pairs
+      for (const pair of CURRENCY_PAIRS) {
+        if (pair === 'EUR/USD') continue; // Already handled
+        
+        // Try to fetch the real data for this pair
+        try {
+          const [baseCurrency, quoteCurrency] = pair.split('/');
+          const response = await fetch(
+            `${API_CONFIG.BASE_URL}?function=CURRENCY_EXCHANGE_RATE&from_currency=${baseCurrency}&to_currency=${quoteCurrency}&apikey=${API_CONFIG.API_KEY}`
+          );
+          const data = await response.json();
+          
+          if (data['Realtime Currency Exchange Rate']) {
+            const rate = parseFloat(data['Realtime Currency Exchange Rate']['5. Exchange Rate']);
+            const bid = rate;
+            const ask = pair.includes('JPY') ? bid + 0.02 : bid + 0.0003; // Appropriate spread based on pair
+            
+            rates.push({
+              pair,
+              bid: bid.toFixed(pair.includes('JPY') ? 2 : 4),
+              ask: ask.toFixed(pair.includes('JPY') ? 2 : 4),
+              change: ((Math.random() * 0.2 - 0.1)).toFixed(2) + '%',
+              changeDirection: Math.random() > 0.5 ? 'up' : 'down'
+            });
+          } else {
+            // Fallback to simulated data
+            let bid = 0;
+            let ask = 0;
+            
+            if (pair === 'GBP/USD') {
+              bid = baseEURUSD * 1.17;
+              ask = bid + 0.0003;
+            } else if (pair === 'USD/JPY') {
+              bid = baseEURUSD * 148;
+              ask = bid + 0.02;
+            } else if (pair === 'AUD/USD') {
+              bid = baseEURUSD * 0.6;
+              ask = bid + 0.0002;
+            } else if (pair === 'EUR/GBP') {
+              bid = baseEURUSD * 0.85;
+              ask = bid + 0.0002;
+            } else if (pair === 'EUR/CHF') {
+              bid = baseEURUSD * 0.95;
+              ask = bid + 0.0003;
+            } else if (pair === 'GBP/JPY') {
+              bid = baseEURUSD * 1.17 * 148;
+              ask = bid + 0.03;
+            }
+            
+            rates.push({
+              pair,
+              bid: bid.toFixed(pair.includes('JPY') ? 2 : 4),
+              ask: ask.toFixed(pair.includes('JPY') ? 2 : 4),
+              change: ((Math.random() * 0.2 - 0.1)).toFixed(2) + '%',
+              changeDirection: Math.random() > 0.5 ? 'up' : 'down'
+            });
+          }
+        } catch (pairError) {
+          console.error(`Error fetching data for ${pair}, using fallback`, pairError);
+          // Use fallback calculation if fetch fails
+          let bid = 0;
+          let ask = 0;
+          
+          if (pair === 'GBP/USD') {
+            bid = baseEURUSD * 1.17;
+            ask = bid + 0.0003;
+          } else if (pair === 'USD/JPY') {
+            bid = baseEURUSD * 148;
+            ask = bid + 0.02;
+          } else if (pair === 'AUD/USD') {
+            bid = baseEURUSD * 0.6;
+            ask = bid + 0.0002;
+          } else if (pair === 'EUR/GBP') {
+            bid = baseEURUSD * 0.85;
+            ask = bid + 0.0002;
+          } else if (pair === 'EUR/CHF') {
+            bid = baseEURUSD * 0.95;
+            ask = bid + 0.0003;
+          } else if (pair === 'GBP/JPY') {
+            bid = baseEURUSD * 1.17 * 148;
+            ask = bid + 0.03;
+          }
+          
+          rates.push({
+            pair,
+            bid: bid.toFixed(pair.includes('JPY') ? 2 : 4),
+            ask: ask.toFixed(pair.includes('JPY') ? 2 : 4),
+            change: ((Math.random() * 0.2 - 0.1)).toFixed(2) + '%',
+            changeDirection: Math.random() > 0.5 ? 'up' : 'down'
+          });
+        }
+      }
       
       return rates;
     } catch (error) {
@@ -142,8 +216,8 @@ export const marketDataService = {
   // Fetch trade signals based on current market conditions and SMC methodology
   fetchTradeSignals: async (): Promise<TradeSignal[]> => {
     try {
-      // In a real implementation, this would call a backend API that analyzes charts
-      const response = await fetch('https://www.alphavantage.co/query?function=FX_DAILY&from_symbol=EUR&to_symbol=USD&apikey=demo');
+      // Fetch real daily forex data
+      const response = await fetch(`${API_CONFIG.BASE_URL}?function=FX_DAILY&from_symbol=EUR&to_symbol=USD&apikey=${API_CONFIG.API_KEY}`);
       const data = await response.json();
       
       if (data['Error Message']) {
@@ -166,17 +240,6 @@ export const marketDataService = {
       
       // Determine if we're in an uptrend or downtrend
       const trend = latestClose > yesterdayClose ? 'buy' : 'sell';
-      
-      // SMC methodology patterns
-      const patterns = [
-        'Fair Value Gap', 
-        'Order Block', 
-        'Break of Structure', 
-        'CHOCH', 
-        'Equilibrium Test', 
-        'Premium Zone', 
-        'Discount Zone'
-      ];
       
       // Generate signals across different time frame classifications
       const signals: TradeSignal[] = [];
@@ -305,8 +368,8 @@ export const marketDataService = {
   // Fetch SMC patterns detected in the market
   fetchSMCPatterns: async (): Promise<SMCPattern[]> => {
     try {
-      // In a real implementation, this would call a backend API that analyzes charts
-      const response = await fetch('https://www.alphavantage.co/query?function=FX_DAILY&from_symbol=EUR&to_symbol=USD&apikey=demo');
+      // Fetch real daily forex data
+      const response = await fetch(`${API_CONFIG.BASE_URL}?function=FX_DAILY&from_symbol=EUR&to_symbol=USD&apikey=${API_CONFIG.API_KEY}`);
       const data = await response.json();
       
       if (data['Error Message']) {
@@ -418,6 +481,11 @@ export const marketDataService = {
       toast.error('Failed to fetch pattern data');
       throw error;
     }
+  },
+  
+  // Get API key for settings
+  getApiKey: (): string => {
+    return API_CONFIG.API_KEY;
   }
 };
 

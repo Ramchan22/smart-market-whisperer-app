@@ -1,4 +1,3 @@
-
 import React from 'react';
 import Header from '@/components/Layout/Header';
 import Footer from '@/components/Layout/Footer';
@@ -11,6 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
+import ApiKeyDisplay from '@/components/Settings/ApiKeyDisplay';
 
 const Settings = () => {
   const { toast } = useToast();
@@ -137,6 +137,8 @@ const Settings = () => {
           </div>
           
           <div className="space-y-6">
+            <ApiKeyDisplay />
+            
             <Card>
               <CardHeader>
                 <CardTitle>Notifications</CardTitle>
@@ -182,15 +184,15 @@ const Settings = () => {
                 
                 <div className="space-y-2">
                   <Label htmlFor="data-provider">Data Provider</Label>
-                  <Select defaultValue="demo">
+                  <Select defaultValue="alphavantage">
                     <SelectTrigger id="data-provider">
                       <SelectValue placeholder="Select provider" />
                     </SelectTrigger>
                     <SelectContent>
+                      <SelectItem value="alphavantage">Alpha Vantage (Live)</SelectItem>
                       <SelectItem value="demo">Demo (Sample Data)</SelectItem>
                       <SelectItem value="oanda">Oanda</SelectItem>
                       <SelectItem value="fxcm">FXCM</SelectItem>
-                      <SelectItem value="ig">IG</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -198,10 +200,10 @@ const Settings = () => {
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
                     <Label htmlFor="real-time-data">Real-time Data</Label>
-                    <Switch id="real-time-data" />
+                    <Switch id="real-time-data" defaultChecked />
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    Enable for live trading (requires valid API key)
+                    Live trading data is enabled with your Alpha Vantage API key
                   </p>
                 </div>
               </CardContent>
