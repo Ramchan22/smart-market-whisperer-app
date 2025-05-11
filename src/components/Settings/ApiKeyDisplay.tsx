@@ -5,12 +5,18 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Copy, CheckCircle } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { toast } from 'sonner';
 
 const ApiKeyDisplay = () => {
   const [copied, setCopied] = useState(false);
+  const [dataProvider, setDataProvider] = useState('alphavantage'); // Default to live
   const apiKey = marketDataService.getApiKey();
+  
+  // Get the current data provider on component mount
+  useEffect(() => {
+    setDataProvider(marketDataService.getDataProvider());
+  }, []);
   
   const handleCopy = () => {
     navigator.clipboard.writeText(apiKey);
@@ -42,7 +48,11 @@ const ApiKeyDisplay = () => {
         <p className="text-sm text-muted-foreground">
           This key is used to access Alpha Vantage's forex data APIs.
           <br/>
-          You're now using live market data where available.
+          {dataProvider === 'demo' ? (
+            "You're currently using demo data. Switch to Alpha Vantage in settings to use this API key."
+          ) : (
+            "You're now using live market data where available."
+          )}
         </p>
       </CardContent>
     </Card>

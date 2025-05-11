@@ -3,8 +3,9 @@ import { toast } from 'sonner';
 
 // API configuration
 const API_CONFIG = {
-  API_KEY: 'AP4TB68V97NKRA53', // Your Alpha Vantage API key
-  BASE_URL: 'https://www.alphavantage.co/query'
+  API_KEY: 'AP4TB68V97NKRA53', // Alpha Vantage API key
+  BASE_URL: 'https://www.alphavantage.co/query',
+  DATA_PROVIDER: 'alphavantage' // Default provider
 };
 
 // API response types
@@ -75,9 +76,34 @@ const SMC_PATTERNS = {
 
 // Main API service for fetching market data
 export const marketDataService = {
+  // Set the data provider
+  setDataProvider: (provider: string): void => {
+    API_CONFIG.DATA_PROVIDER = provider;
+    console.log(`Data provider set to: ${provider}`);
+    localStorage.setItem('dataProvider', provider);
+    
+    // Show toast notification
+    toast.success(`Data provider set to ${provider === 'demo' ? 'Demo (Sample Data)' : 'Alpha Vantage (Live)'}`);
+  },
+  
+  // Get the current data provider
+  getDataProvider: (): string => {
+    // Check localStorage first, then fallback to default
+    return localStorage.getItem('dataProvider') || API_CONFIG.DATA_PROVIDER;
+  },
+
   // Fetch current forex rates for watchlist
   fetchWatchlistData: async (): Promise<ForexRate[]> => {
     try {
+      const dataProvider = marketDataService.getDataProvider();
+      
+      if (dataProvider === 'demo') {
+        // Use demo simulated data
+        console.log('Using demo data for watchlist');
+        return generateDemoWatchlistData();
+      }
+      
+      // Use live API data
       const rates: ForexRate[] = [];
       let baseEURUSD = 0;
       
@@ -100,9 +126,9 @@ export const marketDataService = {
         });
         
         toast.success('Connected to live forex data');
-      } else if (eurUsdData['Information']) {
+      } else if (eurUsdData['Information'] || eurUsdData['Note']) {
         // Handle API limit message
-        console.warn('API Key Information:', eurUsdData['Information']);
+        console.warn('API Key Information:', eurUsdData['Information'] || eurUsdData['Note']);
         toast.warning('API limit reached or key issue. Some data may be simulated.');
         baseEURUSD = 1.12; // Fallback rate
       } else if (eurUsdData['Error Message']) {
@@ -216,12 +242,27 @@ export const marketDataService = {
   // Fetch trade signals based on current market conditions and SMC methodology
   fetchTradeSignals: async (): Promise<TradeSignal[]> => {
     try {
+      const dataProvider = marketDataService.getDataProvider();
+      
+      if (dataProvider === 'demo') {
+        // Use demo simulated data
+        console.log('Using demo data for trade signals');
+        return generateDemoTradeSignals();
+      }
+      
       // Fetch real daily forex data
       const response = await fetch(`${API_CONFIG.BASE_URL}?function=FX_DAILY&from_symbol=EUR&to_symbol=USD&apikey=${API_CONFIG.API_KEY}`);
       const data = await response.json();
       
       if (data['Error Message']) {
         throw new Error(data['Error Message']);
+      }
+      
+      // If we've hit API limits, use demo data
+      if (data['Information'] || data['Note']) {
+        console.warn('API limit reached, using demo data:', data['Information'] || data['Note']);
+        toast.warning('API limit reached, using demo data instead');
+        return generateDemoTradeSignals();
       }
       
       // Get the time series data if available
@@ -368,12 +409,27 @@ export const marketDataService = {
   // Fetch SMC patterns detected in the market
   fetchSMCPatterns: async (): Promise<SMCPattern[]> => {
     try {
+      const dataProvider = marketDataService.getDataProvider();
+      
+      if (dataProvider === 'demo') {
+        // Use demo simulated data
+        console.log('Using demo data for SMC patterns');
+        return generateDemoSMCPatterns();
+      }
+      
       // Fetch real daily forex data
       const response = await fetch(`${API_CONFIG.BASE_URL}?function=FX_DAILY&from_symbol=EUR&to_symbol=USD&apikey=${API_CONFIG.API_KEY}`);
       const data = await response.json();
       
       if (data['Error Message']) {
         throw new Error(data['Error Message']);
+      }
+      
+      // If we've hit API limits, use demo data
+      if (data['Information'] || data['Note']) {
+        console.warn('API limit reached, using demo data:', data['Information'] || data['Note']);
+        toast.warning('API limit reached, using demo data instead');
+        return generateDemoSMCPatterns();
       }
       
       // Get the time series data if available
@@ -488,6 +544,196 @@ export const marketDataService = {
     return API_CONFIG.API_KEY;
   }
 };
+
+// Helper function to generate demo watchlist data
+function generateDemoWatchlistData(): ForexRate[] {
+  const rates: ForexRate[] = [];
+  
+  // Base demo prices
+  const basePrices = {
+    'EUR/USD': 1.0956,
+    'USD/JPY': 156.78,
+    'GBP/USD': 1.2534,
+    'AUD/USD': 0.6611,
+    'EUR/GBP': 0.8737,
+    'EUR/CHF': 0.9768,
+    'GBP/JPY': 196.50
+  };
+  
+  // Generate demo forex rates
+  for (const pair of CURRENCY_PAIRS) {
+    const basePrice = basePrices[pair as keyof typeof basePrices];
+    const spread = pair.includes('JPY') ? 0.02 : 0.0003;
+    const changeValue = (Math.random() * 0.2 - 0.1).toFixed(2); // -0.1% to +0.1%
+    const changeDirection = parseFloat(changeValue) >= 0 ? 'up' : 'down';
+    
+    rates.push({
+      pair,
+      bid: (basePrice - spread/2).toFixed(pair.includes('JPY') ? 2 : 4),
+      ask: (basePrice + spread/2).toFixed(pair.includes('JPY') ? 2 : 4),
+      change: `${changeValue}%`,
+      changeDirection
+    });
+  }
+  
+  toast.success('Using demo market data');
+  return rates;
+}
+
+// Helper function to generate demo trade signals
+function generateDemoTradeSignals(): TradeSignal[] {
+  const signals: TradeSignal[] = [];
+  let idCounter = 1;
+  
+  // Generate demo primary timeframe signals
+  TIME_FRAMES.primary.forEach(timeframe => {
+    const pair = CURRENCY_PAIRS[Math.floor(Math.random() * CURRENCY_PAIRS.length)];
+    const direction = Math.random() > 0.5 ? 'buy' : 'sell';
+    const isJPY = pair.includes('JPY');
+    
+    const basePrice = isJPY ? 155.50 : 1.0950;
+    
+    signals.push({
+      id: idCounter++,
+      pair,
+      direction,
+      pattern: 'Order Block',
+      entry: basePrice.toFixed(isJPY ? 2 : 4),
+      stopLoss: direction === 'buy' 
+        ? (basePrice * 0.998).toFixed(isJPY ? 2 : 4)
+        : (basePrice * 1.002).toFixed(isJPY ? 2 : 4),
+      takeProfit: direction === 'buy'
+        ? (basePrice * 1.005).toFixed(isJPY ? 2 : 4)
+        : (basePrice * 0.995).toFixed(isJPY ? 2 : 4),
+      probability: 'high',
+      timeframe,
+      signalType: direction === 'buy' ? 'discount' : 'premium',
+      analysisTimeframe: 'primary',
+      confirmationStatus: 'confirmed',
+      fibLevel: '61.8%'
+    });
+  });
+  
+  // Add more demo signals for secondary and lower timeframes
+  const demoSignalTypes = ['Fair Value Gap', 'CHOCH', 'Breaker Block', 'Liquidity Sweep'];
+  
+  for (let i = 0; i < 3; i++) {
+    const pair = CURRENCY_PAIRS[Math.floor(Math.random() * CURRENCY_PAIRS.length)];
+    const direction = Math.random() > 0.5 ? 'buy' : 'sell';
+    const isJPY = pair.includes('JPY');
+    const basePrice = isJPY ? 155.50 : 1.0950;
+    const timeframe = TIME_FRAMES.secondary[Math.floor(Math.random() * TIME_FRAMES.secondary.length)];
+    
+    signals.push({
+      id: idCounter++,
+      pair,
+      direction,
+      pattern: demoSignalTypes[Math.floor(Math.random() * demoSignalTypes.length)],
+      entry: basePrice.toFixed(isJPY ? 2 : 4),
+      stopLoss: direction === 'buy'
+        ? (basePrice * 0.997).toFixed(isJPY ? 2 : 4)
+        : (basePrice * 1.003).toFixed(isJPY ? 2 : 4),
+      takeProfit: direction === 'buy'
+        ? (basePrice * 1.006).toFixed(isJPY ? 2 : 4)
+        : (basePrice * 0.994).toFixed(isJPY ? 2 : 4),
+      probability: Math.random() > 0.6 ? 'high' : 'medium',
+      timeframe,
+      signalType: Math.random() > 0.5 ? 'equilibrium' : 'discount',
+      analysisTimeframe: 'secondary',
+      confirmationStatus: Math.random() > 0.5 ? 'watching' : 'confirmed',
+      fibLevel: '50.0%'
+    });
+  }
+  
+  return signals;
+}
+
+// Helper function to generate demo SMC patterns
+function generateDemoSMCPatterns(): SMCPattern[] {
+  const patterns: SMCPattern[] = [];
+  
+  // Demo pattern types
+  const demoPatterns = [
+    {
+      name: 'Fair Value Gap',
+      description: 'Inefficiency in price, potential area for price to revisit',
+      zoneType: 'FVG' as const
+    },
+    {
+      name: 'Order Block',
+      description: 'Area where smart money placed orders before a significant move',
+      zoneType: 'OB' as const
+    },
+    {
+      name: 'Break of Structure',
+      description: 'Key level where price broke previous structure',
+      zoneType: 'BOS' as const
+    },
+    {
+      name: 'Change of Character',
+      description: 'Reversal signal after a break of structure',
+      zoneType: 'CHOCH' as const
+    },
+    {
+      name: 'Liquidity Point',
+      description: 'Area where stop losses are clustered',
+      zoneType: 'Liquidity' as const
+    }
+  ];
+  
+  // Generate patterns for each timeframe category
+  let patternIndex = 0;
+  
+  // Primary timeframes
+  TIME_FRAMES.primary.forEach(timeframe => {
+    const pattern = demoPatterns[patternIndex % demoPatterns.length];
+    patternIndex++;
+    
+    patterns.push({
+      name: pattern.name,
+      description: pattern.description,
+      status: Math.random() > 0.6 ? 'Active' : 'Watching',
+      pair: CURRENCY_PAIRS[Math.floor(Math.random() * CURRENCY_PAIRS.length)],
+      timeframe,
+      zoneType: pattern.zoneType,
+      direction: Math.random() > 0.5 ? 'bullish' : 'bearish'
+    });
+  });
+  
+  // Secondary timeframes
+  TIME_FRAMES.secondary.forEach(timeframe => {
+    const pattern = demoPatterns[patternIndex % demoPatterns.length];
+    patternIndex++;
+    
+    patterns.push({
+      name: pattern.name,
+      description: pattern.description,
+      status: Math.random() > 0.6 ? 'Detected' : 'Pending',
+      pair: CURRENCY_PAIRS[Math.floor(Math.random() * CURRENCY_PAIRS.length)],
+      timeframe,
+      zoneType: pattern.zoneType,
+      direction: Math.random() > 0.5 ? 'bullish' : 'bearish'
+    });
+  });
+  
+  // Lower timeframes
+  TIME_FRAMES.lower.forEach(timeframe => {
+    const pattern = demoPatterns[patternIndex % demoPatterns.length];
+    patternIndex++;
+    
+    patterns.push({
+      name: pattern.name,
+      description: pattern.description,
+      status: Math.random() > 0.6 ? 'Pending' : 'Detected',
+      pair: CURRENCY_PAIRS[Math.floor(Math.random() * CURRENCY_PAIRS.length)],
+      timeframe,
+      zoneType: pattern.zoneType,
+      direction: Math.random() > 0.5 ? 'bullish' : 'bearish'
+    });
+  });
+  
+  return patterns;
+}
 
 // Helper function to calculate base price for a currency pair
 function calculateBasePriceForPair(baseRate: number, pair: string): number {

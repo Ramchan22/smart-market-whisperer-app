@@ -1,4 +1,5 @@
-import React from 'react';
+
+import React, { useState, useEffect } from 'react';
 import Header from '@/components/Layout/Header';
 import Footer from '@/components/Layout/Footer';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -11,15 +12,33 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
 import ApiKeyDisplay from '@/components/Settings/ApiKeyDisplay';
+import { marketDataService } from '@/services/marketDataService';
 
 const Settings = () => {
   const { toast } = useToast();
+  const [dataProvider, setDataProvider] = useState('alphavantage');
+  const [realTimeData, setRealTimeData] = useState(true);
+  
+  // Load current settings
+  useEffect(() => {
+    const currentProvider = marketDataService.getDataProvider();
+    setDataProvider(currentProvider);
+    setRealTimeData(currentProvider === 'alphavantage');
+  }, []);
 
   const handleSave = () => {
+    // Save all settings
+    marketDataService.setDataProvider(dataProvider);
+    
     toast({
       title: "Settings saved",
       description: "Your preferences have been updated successfully.",
     });
+  };
+  
+  const handleDataProviderChange = (value: string) => {
+    setDataProvider(value);
+    setRealTimeData(value === 'alphavantage');
   };
 
   return (
@@ -176,7 +195,7 @@ const Settings = () => {
               <CardContent className="space-y-4">
                 <div className="space-y-2">
                   <Label htmlFor="api-key">API Key</Label>
-                  <Input id="api-key" type="password" placeholder="Enter your API key" />
+                  <Input id="api-key" type="password" value={marketDataService.getApiKey()} readOnly placeholder="Enter your API key" />
                   <p className="text-xs text-muted-foreground">
                     Used for live market data access
                   </p>
@@ -184,7 +203,10 @@ const Settings = () => {
                 
                 <div className="space-y-2">
                   <Label htmlFor="data-provider">Data Provider</Label>
-                  <Select defaultValue="alphavantage">
+                  <Select 
+                    value={dataProvider} 
+                    onValueChange={handleDataProviderChange}
+                  >
                     <SelectTrigger id="data-provider">
                       <SelectValue placeholder="Select provider" />
                     </SelectTrigger>
@@ -200,10 +222,19 @@ const Settings = () => {
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
                     <Label htmlFor="real-time-data">Real-time Data</Label>
-                    <Switch id="real-time-data" defaultChecked />
+                    <Switch 
+                      id="real-time-data" 
+                      checked={realTimeData}
+                      onCheckedChange={(checked) => {
+                        setRealTimeData(checked);
+                        setDataProvider(checked ? 'alphavantage' : 'demo');
+                      }}
+                    />
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    Live trading data is enabled with your Alpha Vantage API key
+                    {realTimeData 
+                      ? "Live trading data is enabled with your Alpha Vantage API key" 
+                      : "Using demo data mode (no API calls)"}
                   </p>
                 </div>
               </CardContent>
