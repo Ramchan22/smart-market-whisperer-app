@@ -1,23 +1,45 @@
 
 import React, { useState, useEffect } from 'react';
-import { TrendingUp, TrendingDown, Loader2 } from 'lucide-react';
+import { TrendingUp, TrendingDown, Loader2, AlertCircle } from 'lucide-react';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
+import { Badge } from '@/components/ui/badge';
 import { marketDataService, ForexRate } from '@/services/marketDataService';
 
 const WatchList = () => {
   const [watchlistData, setWatchlistData] = useState<ForexRate[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [dataProvider, setDataProvider] = useState('demo');
+  const [rateLimitReached, setRateLimitReached] = useState(false);
   
   const loadWatchlistData = async () => {
     setLoading(true);
     setError(null);
     
     try {
+      // Get current provider before fetching data
+      const currentProvider = marketDataService.getDataProvider();
+      setDataProvider(currentProvider);
+      setRateLimitReached(marketDataService.isRateLimitReached());
+      
       const data = await marketDataService.fetchWatchlistData();
       setWatchlistData(data);
+      
+      // Check if rate limit was reached during fetch
+      setRateLimitReached(marketDataService.isRateLimitReached());
+      
+      // Show toast only on initial load
+      if (loading && watchlistData.length === 0) {
+        if (marketDataService.isRateLimitReached()) {
+          toast.warning('API rate limit reached. Using demo data instead.');
+        } else if (currentProvider === 'demo') {
+          toast.info('Using demo market data. Switch to live data in Settings.');
+        } else {
+          toast.success('Watchlist updated with live data');
+        }
+      }
     } catch (err) {
       console.error('Error fetching watchlist data:', err);
       setError('Failed to load market data. Please try again.');
@@ -32,13 +54,33 @@ const WatchList = () => {
     // Refresh data every minute
     const intervalId = setInterval(loadWatchlistData, 60 * 1000);
     
-    return () => clearInterval(intervalId);
+    // Listen for rate limit events
+    const handleRateLimit = () => {
+      setRateLimitReached(true);
+      // Reload data when rate limit is reached to get demo data
+      loadWatchlistData();
+    };
+    
+    window.addEventListener('alphavantage-rate-limit', handleRateLimit);
+    
+    return () => {
+      clearInterval(intervalId);
+      window.removeEventListener('alphavantage-rate-limit', handleRateLimit);
+    };
   }, []);
   
   return (
     <div className="bg-card rounded-lg p-4 shadow-md">
       <div className="flex justify-between items-center mb-4">
-        <h2 className="text-lg font-semibold">Forex Watchlist</h2>
+        <div className="flex items-center gap-2">
+          <h2 className="text-lg font-semibold">Forex Watchlist</h2>
+          {rateLimitReached && (
+            <Badge variant="destructive" className="text-xs">API Limit</Badge>
+          )}
+          <Badge variant="outline" className="text-xs">
+            {dataProvider === 'alphavantage' ? 'Live' : 'Demo'}
+          </Badge>
+        </div>
         <Button 
           variant="ghost" 
           size="sm" 
@@ -50,7 +92,8 @@ const WatchList = () => {
       </div>
       
       {error && (
-        <div className="p-4 mb-4 text-sm border border-destructive/50 bg-destructive/10 text-destructive rounded-md">
+        <div className="p-4 mb-4 text-sm border border-destructive/50 bg-destructive/10 text-destructive rounded-md flex items-center gap-2">
+          <AlertCircle className="h-4 w-4" />
           {error}
         </div>
       )}

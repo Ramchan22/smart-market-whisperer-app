@@ -1,4 +1,3 @@
-
 import { toast } from 'sonner';
 
 // API configuration
@@ -6,6 +5,19 @@ const API_CONFIG = {
   API_KEY: 'AP4TB68V97NKRA53', // Alpha Vantage API key
   BASE_URL: 'https://www.alphavantage.co/query',
   DATA_PROVIDER: 'alphavantage' // Default provider
+};
+
+// Track API rate limit status
+let isRateLimitReached = false;
+
+// Helper to dispatch rate limit event
+const emitRateLimitEvent = () => {
+  if (!isRateLimitReached) {
+    isRateLimitReached = true;
+    // Dispatch a custom event that components can listen for
+    window.dispatchEvent(new CustomEvent('alphavantage-rate-limit'));
+    console.warn('Alpha Vantage API rate limit reached, switching to demo data');
+  }
 };
 
 // API response types
@@ -82,6 +94,11 @@ export const marketDataService = {
     console.log(`Data provider set to: ${provider}`);
     localStorage.setItem('dataProvider', provider);
     
+    // Reset rate limit status when switching to demo mode
+    if (provider === 'demo') {
+      isRateLimitReached = false;
+    }
+    
     // Show toast notification
     toast.success(`Data provider set to ${provider === 'demo' ? 'Demo (Sample Data)' : 'Alpha Vantage (Live)'}`);
   },
@@ -91,15 +108,29 @@ export const marketDataService = {
     // Check localStorage first, then fallback to default
     return localStorage.getItem('dataProvider') || API_CONFIG.DATA_PROVIDER;
   },
+  
+  // Check if rate limit has been reached
+  isRateLimitReached: (): boolean => {
+    return isRateLimitReached;
+  },
+
+  // Reset rate limit status (for testing)
+  resetRateLimitStatus: (): void => {
+    isRateLimitReached = false;
+  },
 
   // Fetch current forex rates for watchlist
   fetchWatchlistData: async (): Promise<ForexRate[]> => {
     try {
       const dataProvider = marketDataService.getDataProvider();
       
-      if (dataProvider === 'demo') {
-        // Use demo simulated data
-        console.log('Using demo data for watchlist');
+      // Always use demo data if that's what's selected or if rate limit is reached
+      if (dataProvider === 'demo' || isRateLimitReached) {
+        if (dataProvider !== 'demo' && isRateLimitReached) {
+          console.log('Using demo data for watchlist due to API rate limit');
+        } else {
+          console.log('Using demo data for watchlist as selected');
+        }
         return generateDemoWatchlistData();
       }
       
@@ -129,8 +160,13 @@ export const marketDataService = {
       } else if (eurUsdData['Information'] || eurUsdData['Note']) {
         // Handle API limit message
         console.warn('API Key Information:', eurUsdData['Information'] || eurUsdData['Note']);
-        toast.warning('API limit reached or key issue. Some data may be simulated.');
-        baseEURUSD = 1.12; // Fallback rate
+        toast.warning('API limit reached or key issue. Switching to demo data.');
+        
+        // Set rate limit flag and emit event
+        emitRateLimitEvent();
+        
+        // Return demo data instead
+        return generateDemoWatchlistData();
       } else if (eurUsdData['Error Message']) {
         throw new Error(eurUsdData['Error Message']);
       }
@@ -149,6 +185,46 @@ export const marketDataService = {
             `${API_CONFIG.BASE_URL}?function=CURRENCY_EXCHANGE_RATE&from_currency=${baseCurrency}&to_currency=${quoteCurrency}&apikey=${API_CONFIG.API_KEY}`
           );
           const data = await response.json();
+          
+          // Check for rate limit message
+          if (data['Information'] || data['Note']) {
+            console.warn('API Key Information for pair', pair, ':', data['Information'] || data['Note']);
+            // Don't throw here, just use fallback data
+            emitRateLimitEvent();
+            
+            // Use fallback calculation
+            let bid = 0;
+            let ask = 0;
+            
+            if (pair === 'GBP/USD') {
+              bid = baseEURUSD * 1.17;
+              ask = bid + 0.0003;
+            } else if (pair === 'USD/JPY') {
+              bid = baseEURUSD * 148;
+              ask = bid + 0.02;
+            } else if (pair === 'AUD/USD') {
+              bid = baseEURUSD * 0.6;
+              ask = bid + 0.0002;
+            } else if (pair === 'EUR/GBP') {
+              bid = baseEURUSD * 0.85;
+              ask = bid + 0.0002;
+            } else if (pair === 'EUR/CHF') {
+              bid = baseEURUSD * 0.95;
+              ask = bid + 0.0003;
+            } else if (pair === 'GBP/JPY') {
+              bid = baseEURUSD * 1.17 * 148;
+              ask = bid + 0.03;
+            }
+            
+            rates.push({
+              pair,
+              bid: bid.toFixed(pair.includes('JPY') ? 2 : 4),
+              ask: ask.toFixed(pair.includes('JPY') ? 2 : 4),
+              change: ((Math.random() * 0.2 - 0.1)).toFixed(2) + '%',
+              changeDirection: Math.random() > 0.5 ? 'up' : 'down'
+            });
+            continue;
+          }
           
           if (data['Realtime Currency Exchange Rate']) {
             const rate = parseFloat(data['Realtime Currency Exchange Rate']['5. Exchange Rate']);
@@ -235,7 +311,8 @@ export const marketDataService = {
     } catch (error) {
       console.error('Error fetching forex data:', error);
       toast.error('Failed to fetch market data');
-      throw error;
+      emitRateLimitEvent();
+      return generateDemoWatchlistData();
     }
   },
   
@@ -244,9 +321,13 @@ export const marketDataService = {
     try {
       const dataProvider = marketDataService.getDataProvider();
       
-      if (dataProvider === 'demo') {
-        // Use demo simulated data
-        console.log('Using demo data for trade signals');
+      // Always use demo data if that's what's selected or rate limit reached
+      if (dataProvider === 'demo' || isRateLimitReached) {
+        if (dataProvider !== 'demo' && isRateLimitReached) {
+          console.warn('API limit reached, using demo data for trade signals');
+        } else {
+          console.log('Using demo data for trade signals as selected');
+        }
         return generateDemoTradeSignals();
       }
       
@@ -262,6 +343,7 @@ export const marketDataService = {
       if (data['Information'] || data['Note']) {
         console.warn('API limit reached, using demo data:', data['Information'] || data['Note']);
         toast.warning('API limit reached, using demo data instead');
+        emitRateLimitEvent();
         return generateDemoTradeSignals();
       }
       
@@ -402,7 +484,8 @@ export const marketDataService = {
     } catch (error) {
       console.error('Error fetching trade signals:', error);
       toast.error('Failed to fetch trade signals');
-      throw error;
+      emitRateLimitEvent();
+      return generateDemoTradeSignals();
     }
   },
   
@@ -411,9 +494,13 @@ export const marketDataService = {
     try {
       const dataProvider = marketDataService.getDataProvider();
       
-      if (dataProvider === 'demo') {
-        // Use demo simulated data
-        console.log('Using demo data for SMC patterns');
+      // Always use demo data if that's what's selected or rate limit reached
+      if (dataProvider === 'demo' || isRateLimitReached) {
+        if (dataProvider !== 'demo' && isRateLimitReached) {
+          console.warn('API limit reached, using demo data for SMC patterns');
+        } else {
+          console.log('Using demo data for SMC patterns as selected');
+        }
         return generateDemoSMCPatterns();
       }
       
@@ -429,6 +516,7 @@ export const marketDataService = {
       if (data['Information'] || data['Note']) {
         console.warn('API limit reached, using demo data:', data['Information'] || data['Note']);
         toast.warning('API limit reached, using demo data instead');
+        emitRateLimitEvent();
         return generateDemoSMCPatterns();
       }
       
@@ -535,7 +623,8 @@ export const marketDataService = {
     } catch (error) {
       console.error('Error fetching SMC patterns:', error);
       toast.error('Failed to fetch pattern data');
-      throw error;
+      emitRateLimitEvent();
+      return generateDemoSMCPatterns();
     }
   },
   
