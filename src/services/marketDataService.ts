@@ -20,6 +20,18 @@ const emitRateLimitEvent = () => {
   }
 };
 
+// Helper to check response for rate limit messages
+const checkForRateLimit = (data: any): boolean => {
+  if (data && (data['Information'] || data['Note'])) {
+    const message = data['Information'] || data['Note'];
+    if (message && message.includes('API rate limit')) {
+      emitRateLimitEvent();
+      return true;
+    }
+  }
+  return false;
+};
+
 // API response types
 export interface ForexRate {
   pair: string;
@@ -117,6 +129,7 @@ export const marketDataService = {
   // Reset rate limit status (for testing)
   resetRateLimitStatus: (): void => {
     isRateLimitReached = false;
+    toast.success('API rate limit status has been reset');
   },
 
   // Fetch current forex rates for watchlist
@@ -157,22 +170,13 @@ export const marketDataService = {
         });
         
         toast.success('Connected to live forex data');
-      } else if (eurUsdData['Information'] || eurUsdData['Note']) {
+      } else if (checkForRateLimit(eurUsdData)) {
         // Handle API limit message
-        console.warn('API Key Information:', eurUsdData['Information'] || eurUsdData['Note']);
-        toast.warning('API limit reached or key issue. Switching to demo data.');
-        
-        // Set rate limit flag and emit event
-        emitRateLimitEvent();
-        
-        // Return demo data instead
+        toast.warning('API limit reached. Switching to demo data.');
         return generateDemoWatchlistData();
       } else if (eurUsdData['Error Message']) {
         throw new Error(eurUsdData['Error Message']);
       }
-      
-      // Now fetch other currency pairs if possible, or generate them based on typical relationships
-      // We'll fetch actual data for major pairs when possible, with fallbacks
       
       // Generate or fetch remaining pairs
       for (const pair of CURRENCY_PAIRS) {
@@ -187,11 +191,7 @@ export const marketDataService = {
           const data = await response.json();
           
           // Check for rate limit message
-          if (data['Information'] || data['Note']) {
-            console.warn('API Key Information for pair', pair, ':', data['Information'] || data['Note']);
-            // Don't throw here, just use fallback data
-            emitRateLimitEvent();
-            
+          if (checkForRateLimit(data)) {
             // Use fallback calculation
             let bid = 0;
             let ask = 0;
@@ -340,10 +340,8 @@ export const marketDataService = {
       }
       
       // If we've hit API limits, use demo data
-      if (data['Information'] || data['Note']) {
-        console.warn('API limit reached, using demo data:', data['Information'] || data['Note']);
+      if (checkForRateLimit(data)) {
         toast.warning('API limit reached, using demo data instead');
-        emitRateLimitEvent();
         return generateDemoTradeSignals();
       }
       
@@ -353,7 +351,7 @@ export const marketDataService = {
         throw new Error('No time series data available');
       }
       
-      // Get the last 10 days of data to analyze trend and structure
+      // Determine if we're in an uptrend or downtrend
       const dates = Object.keys(timeSeriesData).slice(0, 10);
       const latestData = timeSeriesData[dates[0]];
       const yesterdayData = timeSeriesData[dates[1]];
@@ -513,10 +511,8 @@ export const marketDataService = {
       }
       
       // If we've hit API limits, use demo data
-      if (data['Information'] || data['Note']) {
-        console.warn('API limit reached, using demo data:', data['Information'] || data['Note']);
+      if (checkForRateLimit(data)) {
         toast.warning('API limit reached, using demo data instead');
-        emitRateLimitEvent();
         return generateDemoSMCPatterns();
       }
       
@@ -785,82 +781,4 @@ function generateDemoSMCPatterns(): SMCPattern[] {
       pair: CURRENCY_PAIRS[Math.floor(Math.random() * CURRENCY_PAIRS.length)],
       timeframe,
       zoneType: pattern.zoneType,
-      direction: Math.random() > 0.5 ? 'bullish' : 'bearish'
-    });
-  });
-  
-  // Secondary timeframes
-  TIME_FRAMES.secondary.forEach(timeframe => {
-    const pattern = demoPatterns[patternIndex % demoPatterns.length];
-    patternIndex++;
-    
-    patterns.push({
-      name: pattern.name,
-      description: pattern.description,
-      status: Math.random() > 0.6 ? 'Detected' : 'Pending',
-      pair: CURRENCY_PAIRS[Math.floor(Math.random() * CURRENCY_PAIRS.length)],
-      timeframe,
-      zoneType: pattern.zoneType,
-      direction: Math.random() > 0.5 ? 'bullish' : 'bearish'
-    });
-  });
-  
-  // Lower timeframes
-  TIME_FRAMES.lower.forEach(timeframe => {
-    const pattern = demoPatterns[patternIndex % demoPatterns.length];
-    patternIndex++;
-    
-    patterns.push({
-      name: pattern.name,
-      description: pattern.description,
-      status: Math.random() > 0.6 ? 'Pending' : 'Detected',
-      pair: CURRENCY_PAIRS[Math.floor(Math.random() * CURRENCY_PAIRS.length)],
-      timeframe,
-      zoneType: pattern.zoneType,
-      direction: Math.random() > 0.5 ? 'bullish' : 'bearish'
-    });
-  });
-  
-  return patterns;
-}
-
-// Helper function to calculate base price for a currency pair
-function calculateBasePriceForPair(baseRate: number, pair: string): number {
-  let pairBasePrice = baseRate;
-  if (pair === 'GBP/USD') pairBasePrice *= 1.17;
-  else if (pair === 'USD/JPY') pairBasePrice *= 148;
-  else if (pair === 'AUD/USD') pairBasePrice *= 0.6;
-  else if (pair === 'EUR/GBP') pairBasePrice *= 0.85;
-  else if (pair === 'EUR/CHF') pairBasePrice *= 0.95;
-  else if (pair === 'GBP/JPY') pairBasePrice = baseRate * 1.17 * 148;
-  
-  return pairBasePrice;
-}
-
-// Helper function to calculate stop loss based on direction and price
-function calculateStopLoss(
-  basePrice: number,
-  direction: string,
-  percentage: number,
-  pair: string
-): string {
-  const stopLoss = direction === 'buy'
-    ? basePrice - (basePrice * percentage)
-    : basePrice + (basePrice * percentage);
-  
-  return stopLoss.toFixed(pair.includes('JPY') ? 2 : 4);
-}
-
-// Helper function to calculate take profit based on direction and price
-function calculateTakeProfit(
-  basePrice: number,
-  direction: string,
-  percentage: number,
-  pair: string
-): string {
-  const takeProfit = direction === 'buy'
-    ? basePrice + (basePrice * percentage)
-    : basePrice - (basePrice * percentage);
-  
-  return takeProfit.toFixed(pair.includes('JPY') ? 2 : 4);
-}
+      direction: Math.

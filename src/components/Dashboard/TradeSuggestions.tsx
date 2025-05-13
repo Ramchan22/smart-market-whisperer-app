@@ -1,6 +1,5 @@
-
 import React, { useState, useEffect } from 'react';
-import { TrendingUp, TrendingDown, ChartBar, ArrowRight, Loader2, Filter, Check } from 'lucide-react';
+import { TrendingUp, TrendingDown, ChartBar, ArrowRight, Loader2, Filter, Check, AlertCircle } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
@@ -23,6 +22,8 @@ const TradeSuggestions = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [currencyPairFilter, setCurrencyPairFilter] = useState<string | null>(null);
+  const [isUsingDemoData, setIsUsingDemoData] = useState(false);
+  const [currentDataProvider, setCurrentDataProvider] = useState('');
   const [probabilityFilter, setProbabilityFilter] = useState<{
     high: boolean;
     medium: boolean;
@@ -64,17 +65,35 @@ const TradeSuggestions = () => {
     setError(null);
     
     try {
+      // First check if we're already rate limited before making API calls
+      if (marketDataService.isRateLimitReached() && marketDataService.getDataProvider() === 'alphavantage') {
+        setIsUsingDemoData(true);
+        setCurrentDataProvider('demo (rate limited)');
+      } else {
+        setCurrentDataProvider(marketDataService.getDataProvider());
+        setIsUsingDemoData(marketDataService.getDataProvider() === 'demo');
+      }
+      
       const signals = await marketDataService.fetchTradeSignals();
       setTradeSuggestions(signals);
       applyFilters(signals, currencyPairFilter, probabilityFilter);
-      useToastHook({
-        title: "Trade Signals Updated",
-        description: `Found ${signals.length} potential trading opportunities.`,
-        duration: 3000,
-      });
       
-      // Also show in sonner toast
-      toast.success(`Found ${signals.length} potential trading opportunities.`);
+      // Check if we're using demo data after the API call
+      setIsUsingDemoData(marketDataService.getDataProvider() === 'demo' || marketDataService.isRateLimitReached());
+      
+      if (marketDataService.isRateLimitReached() && marketDataService.getDataProvider() === 'alphavantage') {
+        setCurrentDataProvider('demo (rate limited)');
+        toast.warning('API rate limit reached. Using demo data instead.');
+      } else {
+        useToastHook({
+          title: "Trade Signals Updated",
+          description: `Found ${signals.length} potential trading opportunities.`,
+          duration: 3000,
+        });
+        
+        // Also show in sonner toast
+        toast.success(`Found ${signals.length} potential trading opportunities.`);
+      }
     } catch (err) {
       console.error('Error fetching trade signals:', err);
       setError('Failed to load trade signals. Please try again.');
@@ -94,7 +113,19 @@ const TradeSuggestions = () => {
     // Refresh signals every 5 minutes
     const intervalId = setInterval(loadTradeSignals, 5 * 60 * 1000);
     
-    return () => clearInterval(intervalId);
+    // Listen for rate limit events
+    const handleRateLimit = () => {
+      setIsUsingDemoData(true);
+      setCurrentDataProvider('demo (rate limited)');
+      toast.warning('API rate limit reached. Using demo data instead.');
+    };
+    
+    window.addEventListener('alphavantage-rate-limit', handleRateLimit);
+    
+    return () => {
+      clearInterval(intervalId);
+      window.removeEventListener('alphavantage-rate-limit', handleRateLimit);
+    };
   }, []);
   
   useEffect(() => {
@@ -169,7 +200,20 @@ const TradeSuggestions = () => {
   return (
     <div className="bg-card rounded-lg p-4 shadow-md h-full">
       <div className="flex justify-between items-center mb-4">
-        <h2 className="text-lg font-semibold">SMC Trade Signals</h2>
+        <div className="flex items-center gap-2">
+          <h2 className="text-lg font-semibold">SMC Trade Signals</h2>
+          {isUsingDemoData && (
+            <Badge variant="outline" className="text-amber-500 border-amber-500 bg-amber-100/30">
+              <AlertCircle className="w-3 h-3 mr-1" />
+              Demo Data
+            </Badge>
+          )}
+          {!isUsingDemoData && (
+            <Badge variant="outline" className="text-green-500 border-green-500 bg-green-100/30">
+              Live Data
+            </Badge>
+          )}
+        </div>
         <div className="flex items-center space-x-2">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -312,6 +356,20 @@ const TradeSuggestions = () => {
       {error && (
         <div className="p-4 mb-4 text-sm border border-destructive/50 bg-destructive/10 text-destructive rounded-md">
           {error}
+        </div>
+      )}
+      
+      {/* Data source indicator */}
+      {isUsingDemoData && marketDataService.getDataProvider() === 'alphavantage' && (
+        <div className="p-3 mb-4 text-sm border border-amber-500/30 bg-amber-100/20 text-amber-700 rounded-md flex items-center gap-2">
+          <AlertCircle className="h-4 w-4" />
+          <div>
+            <p><strong>Using demo data due to API rate limits.</strong></p>
+            <p className="text-xs mt-1">
+              Alpha Vantage free tier is limited to 25 requests per day.
+              You can switch to "Demo" mode in Settings to avoid unnecessary API calls.
+            </p>
+          </div>
         </div>
       )}
       

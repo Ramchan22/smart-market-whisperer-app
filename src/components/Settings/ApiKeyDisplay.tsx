@@ -1,10 +1,10 @@
 
 import React from 'react';
 import { marketDataService } from '@/services/marketDataService';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Copy, CheckCircle, ExternalLink } from 'lucide-react';
+import { Copy, CheckCircle, ExternalLink, RefreshCw, AlertCircle } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
@@ -18,6 +18,7 @@ const ApiKeyDisplay = () => {
   // Get the current data provider and rate limit status on component mount
   useEffect(() => {
     setDataProvider(marketDataService.getDataProvider());
+    setRateLimitReached(marketDataService.isRateLimitReached());
     
     // Listen for rate limit events
     const handleRateLimit = () => {
@@ -43,6 +44,12 @@ const ApiKeyDisplay = () => {
   
   const openAlphaVantageWebsite = () => {
     window.open('https://www.alphavantage.co/premium/', '_blank');
+  };
+  
+  const resetRateLimit = () => {
+    marketDataService.resetRateLimitStatus();
+    setRateLimitReached(false);
+    toast.success('API rate limit status has been reset. You can now try live data again.');
   };
   
   return (
@@ -89,20 +96,45 @@ const ApiKeyDisplay = () => {
           </p>
           
           {rateLimitReached && (
-            <div className="bg-destructive/10 text-destructive rounded p-2 text-sm">
-              <strong>API Rate Limit Reached:</strong> Standard free accounts are limited to 25 requests per day.
-              <Button 
-                variant="link" 
-                size="sm" 
-                className="text-destructive flex items-center gap-1 p-0 h-auto mt-1"
-                onClick={openAlphaVantageWebsite}
-              >
-                Upgrade to Premium <ExternalLink className="h-3 w-3" />
-              </Button>
+            <div className="bg-destructive/10 text-destructive rounded p-3 text-sm">
+              <div className="flex items-start gap-2">
+                <AlertCircle className="h-4 w-4 mt-0.5" />
+                <div>
+                  <strong>API Rate Limit Reached:</strong> Standard free accounts are limited to 25 requests per day.
+                  <div className="flex items-center gap-3 mt-2">
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      className="text-destructive border-destructive/30 flex items-center gap-1"
+                      onClick={openAlphaVantageWebsite}
+                    >
+                      Upgrade to Premium <ExternalLink className="h-3 w-3 ml-1" />
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="flex items-center gap-1"
+                      onClick={resetRateLimit}
+                    >
+                      <RefreshCw className="h-3 w-3 mr-1" />
+                      Reset Rate Limit
+                    </Button>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
         </div>
       </CardContent>
+      
+      {rateLimitReached && (
+        <CardFooter className="bg-muted/50 pt-3">
+          <p className="text-xs text-muted-foreground">
+            Note: Resetting the rate limit tracker will let you attempt to use live data again, but 
+            if the actual API limit is reached, you'll be automatically switched back to demo data.
+          </p>
+        </CardFooter>
+      )}
     </Card>
   );
 };
