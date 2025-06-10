@@ -36,7 +36,11 @@ interface ChartDataPoint {
   volume?: number;
 }
 
-const ForexChart = () => {
+interface ForexChartProps {
+  onDataUpdate?: (data: ChartDataPoint[], pair: string, loading: boolean) => void;
+}
+
+const ForexChart: React.FC<ForexChartProps> = ({ onDataUpdate }) => {
   const [currencyPair, setCurrencyPair] = useState('EURUSD');
   const [timeframe, setTimeframe] = useState('daily');
   const [chartData, setChartData] = useState<ChartDataPoint[]>([]);
@@ -48,6 +52,12 @@ const ForexChart = () => {
 
   const fetchChartData = async () => {
     setLoading(true);
+    
+    // Notify parent component about loading state
+    if (onDataUpdate) {
+      onDataUpdate(chartData, currencyPair, true);
+    }
+    
     try {
       const provider = marketDataService.getDataProvider();
       setDataProvider(provider);
@@ -58,6 +68,11 @@ const ForexChart = () => {
         setChartData(demoData);
         setCurrentPrice(demoData[demoData.length - 1]?.close || 0);
         setPriceChange(Math.random() * 0.002 - 0.001); // Random change
+        
+        // Notify parent component
+        if (onDataUpdate) {
+          onDataUpdate(demoData, currencyPair, false);
+        }
         return;
       }
 
@@ -90,6 +105,11 @@ const ForexChart = () => {
         setChartData(demoData);
         setCurrentPrice(demoData[demoData.length - 1]?.close || 0);
         setPriceChange(Math.random() * 0.002 - 0.001);
+        
+        // Notify parent component
+        if (onDataUpdate) {
+          onDataUpdate(demoData, currencyPair, false);
+        }
         return;
       }
 
@@ -125,6 +145,11 @@ const ForexChart = () => {
         setPriceChange(previous ? latest.close - previous.close : 0);
       }
 
+      // Notify parent component with live data
+      if (onDataUpdate) {
+        onDataUpdate(processedData, currencyPair, false);
+      }
+
       toast({
         title: "Live Data Loaded",
         description: `Chart updated with Alpha Vantage data for ${currencyPair}`,
@@ -143,6 +168,11 @@ const ForexChart = () => {
       setChartData(demoData);
       setCurrentPrice(demoData[demoData.length - 1]?.close || 0);
       setPriceChange(Math.random() * 0.002 - 0.001);
+      
+      // Notify parent component
+      if (onDataUpdate) {
+        onDataUpdate(demoData, currencyPair, false);
+      }
     } finally {
       setLoading(false);
     }

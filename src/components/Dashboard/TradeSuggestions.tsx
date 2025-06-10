@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { TrendingUp, TrendingDown, ChartBar, ArrowRight, Loader2, Filter, Check, AlertCircle } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
@@ -13,17 +14,35 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { marketDataService, TradeSignal } from '@/services/marketDataService';
+import { TradeSignal } from '@/services/marketDataService';
 import { toast } from 'sonner';
 
-const TradeSuggestions = () => {
+interface ChartDataPoint {
+  time: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume?: number;
+}
+
+interface TradeSuggestionsProps {
+  chartData: ChartDataPoint[];
+  currentPair: string;
+  isLoading: boolean;
+  dataProvider: string;
+}
+
+const TradeSuggestions: React.FC<TradeSuggestionsProps> = ({ 
+  chartData, 
+  currentPair, 
+  isLoading, 
+  dataProvider 
+}) => {
   const [tradeSuggestions, setTradeSuggestions] = useState<TradeSignal[]>([]);
   const [filteredSuggestions, setFilteredSuggestions] = useState<TradeSignal[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [currencyPairFilter, setCurrencyPairFilter] = useState<string | null>(null);
   const [isUsingDemoData, setIsUsingDemoData] = useState(false);
-  const [currentDataProvider, setCurrentDataProvider] = useState('');
   const [probabilityFilter, setProbabilityFilter] = useState<{
     high: boolean;
     medium: boolean;
@@ -34,7 +53,6 @@ const TradeSuggestions = () => {
     low: true,
   });
   
-  // Temporary probability filter state for the popover
   const [tempProbabilityFilter, setTempProbabilityFilter] = useState<{
     high: boolean;
     medium: boolean;
@@ -45,10 +63,162 @@ const TradeSuggestions = () => {
     low: true,
   });
   
-  // State to control the open/close state of the probability filter popover
   const [probabilityPopoverOpen, setProbabilityPopoverOpen] = useState(false);
-  
   const { toast: useToastHook } = useToast();
+  
+  // Analyze chart data for SMC patterns and generate trade signals
+  const analyzeChartData = (data: ChartDataPoint[], pair: string): TradeSignal[] => {
+    if (!data || data.length < 3) return [];
+    
+    const signals: TradeSignal[] = [];
+    let idCounter = Math.floor(Math.random() * 1000);
+    
+    // Get recent price data (last 5 candles)
+    const recentData = data.slice(-5);
+    const latest = recentData[recentData.length - 1];
+    const previous = recentData[recentData.length - 2];
+    
+    if (!latest || !previous) return [];
+    
+    // Determine trend based on recent price action
+    const priceChange = latest.close - previous.close;
+    const isUptrend = priceChange > 0;
+    const volatility = Math.abs(priceChange / previous.close);
+    
+    // Look for Fair Value Gaps (price gaps)
+    for (let i = 0; i < recentData.length - 2; i++) {
+      const candle1 = recentData[i];
+      const candle2 = recentData[i + 1];
+      const candle3 = recentData[i + 2];
+      
+      // Bullish FVG: candle1.low > candle3.high
+      if (candle1.low > candle3.high && isUptrend) {
+        const gapMidpoint = (candle1.low + candle3.high) / 2;
+        signals.push({
+          id: idCounter++,
+          pair,
+          direction: 'buy',
+          pattern: 'Fair Value Gap',
+          entry: gapMidpoint.toFixed(pair.includes('JPY') ? 2 : 4),
+          stopLoss: (gapMidpoint * 0.998).toFixed(pair.includes('JPY') ? 2 : 4),
+          takeProfit: (gapMidpoint * 1.006).toFixed(pair.includes('JPY') ? 2 : 4),
+          probability: volatility > 0.01 ? 'high' : 'medium',
+          timeframe: '1H',
+          signalType: 'discount',
+          analysisTimeframe: 'primary',
+          confirmationStatus: 'confirmed',
+          fibLevel: '61.8%'
+        });
+      }
+      
+      // Bearish FVG: candle1.high < candle3.low
+      if (candle1.high < candle3.low && !isUptrend) {
+        const gapMidpoint = (candle1.high + candle3.low) / 2;
+        signals.push({
+          id: idCounter++,
+          pair,
+          direction: 'sell',
+          pattern: 'Fair Value Gap',
+          entry: gapMidpoint.toFixed(pair.includes('JPY') ? 2 : 4),
+          stopLoss: (gapMidpoint * 1.002).toFixed(pair.includes('JPY') ? 2 : 4),
+          takeProfit: (gapMidpoint * 0.994).toFixed(pair.includes('JPY') ? 2 : 4),
+          probability: volatility > 0.01 ? 'high' : 'medium',
+          timeframe: '1H',
+          signalType: 'premium',
+          analysisTimeframe: 'primary',
+          confirmationStatus: 'confirmed',
+          fibLevel: '61.8%'
+        });
+      }
+    }
+
+    // Look for Order Blocks (significant price moves)
+    for (let i = 0; i < recentData.length - 1; i++) {
+      const candle = recentData[i];
+      const bodySize = Math.abs(candle.close - candle.open);
+      const shadowSize = candle.high - candle.low;
+      
+      // Strong bullish candle with small shadows
+      if (candle.close > candle.open && bodySize > shadowSize * 0.7 && isUptrend) {
+        signals.push({
+          id: idCounter++,
+          pair,
+          direction: 'buy',
+          pattern: 'Order Block',
+          entry: candle.open.toFixed(pair.includes('JPY') ? 2 : 4),
+          stopLoss: (candle.low * 0.999).toFixed(pair.includes('JPY') ? 2 : 4),
+          takeProfit: (candle.high * 1.002).toFixed(pair.includes('JPY') ? 2 : 4),
+          probability: volatility > 0.008 ? 'high' : 'medium',
+          timeframe: '4H',
+          signalType: 'discount',
+          analysisTimeframe: 'primary',
+          confirmationStatus: 'watching'
+        });
+      }
+      
+      // Strong bearish candle
+      if (candle.close < candle.open && bodySize > shadowSize * 0.7 && !isUptrend) {
+        signals.push({
+          id: idCounter++,
+          pair,
+          direction: 'sell',
+          pattern: 'Order Block',
+          entry: candle.open.toFixed(pair.includes('JPY') ? 2 : 4),
+          stopLoss: (candle.high * 1.001).toFixed(pair.includes('JPY') ? 2 : 4),
+          takeProfit: (candle.low * 0.998).toFixed(pair.includes('JPY') ? 2 : 4),
+          probability: volatility > 0.008 ? 'high' : 'medium',
+          timeframe: '4H',
+          signalType: 'premium',
+          analysisTimeframe: 'primary',
+          confirmationStatus: 'watching'
+        });
+      }
+    }
+
+    // Look for Break of Structure
+    const highs = recentData.map(d => d.high);
+    const lows = recentData.map(d => d.low);
+    const recentHigh = Math.max(...highs.slice(0, 3));
+    const recentLow = Math.min(...lows.slice(0, 3));
+    
+    // Bullish BOS - price breaking above recent high
+    if (latest.high > recentHigh && isUptrend) {
+      signals.push({
+        id: idCounter++,
+        pair,
+        direction: 'buy',
+        pattern: 'Break of Structure',
+        entry: recentHigh.toFixed(pair.includes('JPY') ? 2 : 4),
+        stopLoss: (recentHigh * 0.997).toFixed(pair.includes('JPY') ? 2 : 4),
+        takeProfit: (recentHigh * 1.008).toFixed(pair.includes('JPY') ? 2 : 4),
+        probability: 'high',
+        timeframe: '15M',
+        signalType: 'choch',
+        analysisTimeframe: 'secondary',
+        confirmationStatus: 'confirmed'
+      });
+    }
+    
+    // Bearish BOS - price breaking below recent low
+    if (latest.low < recentLow && !isUptrend) {
+      signals.push({
+        id: idCounter++,
+        pair,
+        direction: 'sell',
+        pattern: 'Break of Structure',
+        entry: recentLow.toFixed(pair.includes('JPY') ? 2 : 4),
+        stopLoss: (recentLow * 1.003).toFixed(pair.includes('JPY') ? 2 : 4),
+        takeProfit: (recentLow * 0.992).toFixed(pair.includes('JPY') ? 2 : 4),
+        probability: 'high',
+        timeframe: '15M',
+        signalType: 'choch',
+        analysisTimeframe: 'secondary',
+        confirmationStatus: 'confirmed'
+      });
+    }
+
+    return signals;
+  };
   
   // Helper function to get numerical priority for probability (for sorting)
   const getProbabilityPriority = (probability: string): number => {
@@ -56,77 +226,22 @@ const TradeSuggestions = () => {
       case 'high': return 1;
       case 'medium': return 2;
       case 'low': return 3;
-      default: return 4; // For any other value (shouldn't happen)
+      default: return 4;
     }
   };
   
-  const loadTradeSignals = async () => {
-    setLoading(true);
-    setError(null);
-    
-    try {
-      // First check if we're already rate limited before making API calls
-      if (marketDataService.isRateLimitReached() && marketDataService.getDataProvider() === 'alphavantage') {
-        setIsUsingDemoData(true);
-        setCurrentDataProvider('demo (rate limited)');
-      } else {
-        setCurrentDataProvider(marketDataService.getDataProvider());
-        setIsUsingDemoData(marketDataService.getDataProvider() === 'demo');
-      }
-      
-      const signals = await marketDataService.fetchTradeSignals();
-      setTradeSuggestions(signals);
-      applyFilters(signals, currencyPairFilter, probabilityFilter);
-      
-      // Check if we're using demo data after the API call
-      setIsUsingDemoData(marketDataService.getDataProvider() === 'demo' || marketDataService.isRateLimitReached());
-      
-      if (marketDataService.isRateLimitReached() && marketDataService.getDataProvider() === 'alphavantage') {
-        setCurrentDataProvider('demo (rate limited)');
-        toast.warning('API rate limit reached. Using demo data instead.');
-      } else {
-        useToastHook({
-          title: "Trade Signals Updated",
-          description: `Found ${signals.length} potential trading opportunities.`,
-          duration: 3000,
-        });
-        
-        // Also show in sonner toast
-        toast.success(`Found ${signals.length} potential trading opportunities.`);
-      }
-    } catch (err) {
-      console.error('Error fetching trade signals:', err);
-      setError('Failed to load trade signals. Please try again.');
-      useToastHook({
-        title: "Error",
-        description: "Failed to load trade signals. Please try again.",
-        variant: "destructive",
-      });
-    } finally {
-      setLoading(false);
-    }
-  };
-  
+  // Update trade signals when chart data changes
   useEffect(() => {
-    loadTradeSignals();
-    
-    // Refresh signals every 5 minutes
-    const intervalId = setInterval(loadTradeSignals, 5 * 60 * 1000);
-    
-    // Listen for rate limit events
-    const handleRateLimit = () => {
-      setIsUsingDemoData(true);
-      setCurrentDataProvider('demo (rate limited)');
-      toast.warning('API rate limit reached. Using demo data instead.');
-    };
-    
-    window.addEventListener('alphavantage-rate-limit', handleRateLimit);
-    
-    return () => {
-      clearInterval(intervalId);
-      window.removeEventListener('alphavantage-rate-limit', handleRateLimit);
-    };
-  }, []);
+    if (chartData && chartData.length > 0) {
+      const signals = analyzeChartData(chartData, currentPair);
+      setTradeSuggestions(signals);
+      setIsUsingDemoData(dataProvider === 'demo');
+      
+      if (signals.length > 0) {
+        toast.success(`Found ${signals.length} SMC signals for ${currentPair}`);
+      }
+    }
+  }, [chartData, currentPair, dataProvider]);
   
   useEffect(() => {
     // Apply filters whenever they change
@@ -149,9 +264,8 @@ const TradeSuggestions = () => {
       filtered = filtered.filter(signal => signal.pair === pairFilter);
     }
     
-    // Apply probability filters - only show signals where the probability type is true in the filter
+    // Apply probability filters
     filtered = filtered.filter(signal => {
-      // Check if the signal's probability (high, medium, or low) is true in the probFilter
       return probFilter[signal.probability];
     });
     
@@ -202,17 +316,9 @@ const TradeSuggestions = () => {
       <div className="flex justify-between items-center mb-4">
         <div className="flex items-center gap-2">
           <h2 className="text-lg font-semibold">SMC Trade Signals</h2>
-          {isUsingDemoData && (
-            <Badge variant="outline" className="text-amber-500 border-amber-500 bg-amber-100/30">
-              <AlertCircle className="w-3 h-3 mr-1" />
-              Demo Data
-            </Badge>
-          )}
-          {!isUsingDemoData && (
-            <Badge variant="outline" className="text-green-500 border-green-500 bg-green-100/30">
-              Live Data
-            </Badge>
-          )}
+          <Badge variant={dataProvider === 'alphavantage' ? 'default' : 'outline'}>
+            {dataProvider === 'alphavantage' ? 'Live Analysis' : 'Demo Analysis'}
+          </Badge>
         </div>
         <div className="flex items-center space-x-2">
           <DropdownMenu>
@@ -245,7 +351,6 @@ const TradeSuggestions = () => {
               <DropdownMenuLabel>Probability</DropdownMenuLabel>
               <DropdownMenuSeparator />
               
-              {/* Replace the direct checkbox items with a button that opens a popover */}
               <div className="p-2">
                 <Popover open={probabilityPopoverOpen} onOpenChange={handlePopoverOpen}>
                   <PopoverTrigger asChild>
@@ -331,47 +436,8 @@ const TradeSuggestions = () => {
               </div>
             </DropdownMenuContent>
           </DropdownMenu>
-          
-          <Button 
-            variant="ghost" 
-            size="sm" 
-            className="text-xs"
-            onClick={loadTradeSignals}
-            disabled={loading}
-          >
-            {loading ? (
-              <>
-                <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                Loading...
-              </>
-            ) : (
-              <>
-                Refresh <ArrowRight className="ml-1 h-3 w-3" />
-              </>
-            )}
-          </Button>
         </div>
       </div>
-      
-      {error && (
-        <div className="p-4 mb-4 text-sm border border-destructive/50 bg-destructive/10 text-destructive rounded-md">
-          {error}
-        </div>
-      )}
-      
-      {/* Data source indicator */}
-      {isUsingDemoData && marketDataService.getDataProvider() === 'alphavantage' && (
-        <div className="p-3 mb-4 text-sm border border-amber-500/30 bg-amber-100/20 text-amber-700 rounded-md flex items-center gap-2">
-          <AlertCircle className="h-4 w-4" />
-          <div>
-            <p><strong>Using demo data due to API rate limits.</strong></p>
-            <p className="text-xs mt-1">
-              Alpha Vantage free tier is limited to 25 requests per day.
-              You can switch to "Demo" mode in Settings to avoid unnecessary API calls.
-            </p>
-          </div>
-        </div>
-      )}
       
       {/* Show active filters if any */}
       {(currencyPairFilter || !hasProbabilityFilter || (hasProbabilityFilter && (!probabilityFilter.high || !probabilityFilter.medium || !probabilityFilter.low))) && (
@@ -417,10 +483,10 @@ const TradeSuggestions = () => {
         </div>
       )}
       
-      {loading && filteredSuggestions.length === 0 ? (
+      {isLoading ? (
         <div className="flex flex-col items-center justify-center h-64">
           <Loader2 className="h-8 w-8 animate-spin text-primary mb-2" />
-          <p className="text-muted-foreground">Analyzing market patterns...</p>
+          <p className="text-muted-foreground">Analyzing chart patterns...</p>
         </div>
       ) : (
         <div className="space-y-4">
@@ -478,10 +544,16 @@ const TradeSuggestions = () => {
             ))
           ) : (
             <div className="text-center py-8">
-              <p className="text-muted-foreground">No trade signals match your current filters.</p>
-              <Button variant="outline" size="sm" className="mt-2" onClick={clearFilters}>
-                Clear Filters
-              </Button>
+              <p className="text-muted-foreground">
+                {chartData && chartData.length > 0 
+                  ? "No SMC patterns detected in current chart data."
+                  : "Waiting for chart data to analyze..."}
+              </p>
+              {chartData && chartData.length > 0 && (
+                <Button variant="outline" size="sm" className="mt-2" onClick={clearFilters}>
+                  Clear Filters
+                </Button>
+              )}
             </div>
           )}
         </div>

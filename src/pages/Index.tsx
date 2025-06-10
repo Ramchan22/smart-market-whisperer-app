@@ -11,9 +11,21 @@ import { Info } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { marketDataService } from '@/services/marketDataService';
 
+interface ChartDataPoint {
+  time: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume?: number;
+}
+
 const Index = () => {
   const [dataProvider, setDataProvider] = useState('demo');
   const [rateLimitReached, setRateLimitReached] = useState(false);
+  const [chartData, setChartData] = useState<ChartDataPoint[]>([]);
+  const [currentPair, setCurrentPair] = useState('EURUSD');
+  const [isChartLoading, setIsChartLoading] = useState(false);
   
   // Check data provider on component mount and if it changes
   useEffect(() => {
@@ -32,6 +44,13 @@ const Index = () => {
       window.removeEventListener('alphavantage-rate-limit', handleRateLimit);
     };
   }, []);
+
+  // Handle chart data updates from ForexChart component
+  const handleChartDataUpdate = (data: ChartDataPoint[], pair: string, loading: boolean) => {
+    setChartData(data);
+    setCurrentPair(pair);
+    setIsChartLoading(loading);
+  };
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -77,10 +96,15 @@ const Index = () => {
         
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
           <div className="lg:col-span-2">
-            <ForexChart />
+            <ForexChart onDataUpdate={handleChartDataUpdate} />
           </div>
           <div>
-            <TradeSuggestions />
+            <TradeSuggestions 
+              chartData={chartData}
+              currentPair={currentPair}
+              isLoading={isChartLoading}
+              dataProvider={dataProvider}
+            />
           </div>
         </div>
         
