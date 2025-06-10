@@ -87,15 +87,166 @@ const TIME_FRAMES = {
   lower: ['5M', '3M']
 };
 
-// SMC pattern descriptions
-const SMC_PATTERNS = {
-  FVG: 'Fair Value Gap - Area of inefficiency where price moved rapidly without trading',
-  OB: 'Order Block - Area where smart money placed orders before a move',
-  BOS: 'Break of Structure - Where price breaks previous highs or lows',
-  CHOCH: 'Change of Character - Reversal signal after a break of structure',
-  PREMIUM: 'Price zone above equilibrium - potential sell area',
-  DISCOUNT: 'Price zone below equilibrium - potential buy area',
-  EQUILIBRIUM: '50% balance point between premium and discount zones'
+// Helper function to analyze real price data for signals
+const analyzeMarketData = (timeSeriesData: any, pair: string): TradeSignal[] => {
+  const signals: TradeSignal[] = [];
+  const dates = Object.keys(timeSeriesData).slice(0, 5); // Last 5 days
+  let idCounter = Math.floor(Math.random() * 1000);
+
+  // Get recent price data
+  const recentData = dates.map(date => ({
+    date,
+    open: parseFloat(timeSeriesData[date]['1. open']),
+    high: parseFloat(timeSeriesData[date]['2. high']),
+    low: parseFloat(timeSeriesData[date]['3. low']),
+    close: parseFloat(timeSeriesData[date]['4. close'])
+  }));
+
+  const latest = recentData[0];
+  const previous = recentData[1];
+  
+  // Determine trend based on recent price action
+  const priceChange = latest.close - previous.close;
+  const isUptrend = priceChange > 0;
+  const volatility = Math.abs(priceChange / previous.close);
+
+  // Calculate key levels
+  const dailyRange = latest.high - latest.low;
+  const currentPrice = latest.close;
+  
+  // Look for Fair Value Gaps (price gaps)
+  for (let i = 0; i < recentData.length - 2; i++) {
+    const day1 = recentData[i];
+    const day2 = recentData[i + 1];
+    const day3 = recentData[i + 2];
+    
+    // Bullish FVG: day1.low > day3.high
+    if (day1.low > day3.high && isUptrend) {
+      const gapMidpoint = (day1.low + day3.high) / 2;
+      signals.push({
+        id: idCounter++,
+        pair,
+        direction: 'buy',
+        pattern: 'Fair Value Gap',
+        entry: gapMidpoint.toFixed(pair.includes('JPY') ? 2 : 4),
+        stopLoss: (gapMidpoint * 0.998).toFixed(pair.includes('JPY') ? 2 : 4),
+        takeProfit: (gapMidpoint * 1.006).toFixed(pair.includes('JPY') ? 2 : 4),
+        probability: volatility > 0.01 ? 'high' : 'medium',
+        timeframe: '1H',
+        signalType: 'discount',
+        analysisTimeframe: 'primary',
+        confirmationStatus: 'confirmed',
+        fibLevel: '61.8%'
+      });
+    }
+    
+    // Bearish FVG: day1.high < day3.low
+    if (day1.high < day3.low && !isUptrend) {
+      const gapMidpoint = (day1.high + day3.low) / 2;
+      signals.push({
+        id: idCounter++,
+        pair,
+        direction: 'sell',
+        pattern: 'Fair Value Gap',
+        entry: gapMidpoint.toFixed(pair.includes('JPY') ? 2 : 4),
+        stopLoss: (gapMidpoint * 1.002).toFixed(pair.includes('JPY') ? 2 : 4),
+        takeProfit: (gapMidpoint * 0.994).toFixed(pair.includes('JPY') ? 2 : 4),
+        probability: volatility > 0.01 ? 'high' : 'medium',
+        timeframe: '1H',
+        signalType: 'premium',
+        analysisTimeframe: 'primary',
+        confirmationStatus: 'confirmed',
+        fibLevel: '61.8%'
+      });
+    }
+  }
+
+  // Look for Order Blocks (significant price moves)
+  for (let i = 0; i < recentData.length - 1; i++) {
+    const day = recentData[i];
+    const bodySize = Math.abs(day.close - day.open);
+    const shadowSize = day.high - day.low;
+    
+    // Strong bullish candle with small shadows
+    if (day.close > day.open && bodySize > shadowSize * 0.7 && isUptrend) {
+      signals.push({
+        id: idCounter++,
+        pair,
+        direction: 'buy',
+        pattern: 'Order Block',
+        entry: day.open.toFixed(pair.includes('JPY') ? 2 : 4),
+        stopLoss: (day.low * 0.999).toFixed(pair.includes('JPY') ? 2 : 4),
+        takeProfit: (day.high * 1.002).toFixed(pair.includes('JPY') ? 2 : 4),
+        probability: volatility > 0.008 ? 'high' : 'medium',
+        timeframe: '4H',
+        signalType: 'discount',
+        analysisTimeframe: 'primary',
+        confirmationStatus: 'watching'
+      });
+    }
+    
+    // Strong bearish candle
+    if (day.close < day.open && bodySize > shadowSize * 0.7 && !isUptrend) {
+      signals.push({
+        id: idCounter++,
+        pair,
+        direction: 'sell',
+        pattern: 'Order Block',
+        entry: day.open.toFixed(pair.includes('JPY') ? 2 : 4),
+        stopLoss: (day.high * 1.001).toFixed(pair.includes('JPY') ? 2 : 4),
+        takeProfit: (day.low * 0.998).toFixed(pair.includes('JPY') ? 2 : 4),
+        probability: volatility > 0.008 ? 'high' : 'medium',
+        timeframe: '4H',
+        signalType: 'premium',
+        analysisTimeframe: 'primary',
+        confirmationStatus: 'watching'
+      });
+    }
+  }
+
+  // Look for Break of Structure
+  const highs = recentData.map(d => d.high);
+  const lows = recentData.map(d => d.low);
+  const recentHigh = Math.max(...highs.slice(0, 3));
+  const recentLow = Math.min(...lows.slice(0, 3));
+  
+  // Bullish BOS - price breaking above recent high
+  if (latest.high > recentHigh && isUptrend) {
+    signals.push({
+      id: idCounter++,
+      pair,
+      direction: 'buy',
+      pattern: 'Break of Structure',
+      entry: recentHigh.toFixed(pair.includes('JPY') ? 2 : 4),
+      stopLoss: (recentHigh * 0.997).toFixed(pair.includes('JPY') ? 2 : 4),
+      takeProfit: (recentHigh * 1.008).toFixed(pair.includes('JPY') ? 2 : 4),
+      probability: 'high',
+      timeframe: '15M',
+      signalType: 'choch',
+      analysisTimeframe: 'secondary',
+      confirmationStatus: 'confirmed'
+    });
+  }
+  
+  // Bearish BOS - price breaking below recent low
+  if (latest.low < recentLow && !isUptrend) {
+    signals.push({
+      id: idCounter++,
+      pair,
+      direction: 'sell',
+      pattern: 'Break of Structure',
+      entry: recentLow.toFixed(pair.includes('JPY') ? 2 : 4),
+      stopLoss: (recentLow * 1.003).toFixed(pair.includes('JPY') ? 2 : 4),
+      takeProfit: (recentLow * 0.992).toFixed(pair.includes('JPY') ? 2 : 4),
+      probability: 'high',
+      timeframe: '15M',
+      signalType: 'choch',
+      analysisTimeframe: 'secondary',
+      confirmationStatus: 'confirmed'
+    });
+  }
+
+  return signals;
 };
 
 // Main API service for fetching market data
@@ -331,157 +482,54 @@ export const marketDataService = {
         return generateDemoTradeSignals();
       }
       
-      // Fetch real daily forex data
-      const response = await fetch(`${API_CONFIG.BASE_URL}?function=FX_DAILY&from_symbol=EUR&to_symbol=USD&apikey=${API_CONFIG.API_KEY}`);
-      const data = await response.json();
+      console.log('Fetching live market data for trade signals...');
+      const allSignals: TradeSignal[] = [];
       
-      if (data['Error Message']) {
-        throw new Error(data['Error Message']);
+      // Fetch real data for major pairs and analyze
+      for (const pair of CURRENCY_PAIRS.slice(0, 3)) { // Limit to 3 pairs to avoid rate limits
+        try {
+          const [baseCurrency, quoteCurrency] = pair.split('/');
+          const response = await fetch(`${API_CONFIG.BASE_URL}?function=FX_DAILY&from_symbol=${baseCurrency}&to_symbol=${quoteCurrency}&apikey=${API_CONFIG.API_KEY}`);
+          const data = await response.json();
+          
+          if (data['Error Message']) {
+            throw new Error(data['Error Message']);
+          }
+          
+          // If we've hit API limits, use demo data
+          if (checkForRateLimit(data)) {
+            console.warn('API limit reached while fetching trade signals, using demo data');
+            return generateDemoTradeSignals();
+          }
+          
+          // Get the time series data if available
+          const timeSeriesData = data['Time Series FX (Daily)'];
+          if (timeSeriesData) {
+            const pairSignals = analyzeMarketData(timeSeriesData, pair);
+            allSignals.push(...pairSignals);
+            console.log(`Generated ${pairSignals.length} signals for ${pair} based on live data`);
+          }
+          
+          // Add small delay between requests to avoid hitting rate limits
+          await new Promise(resolve => setTimeout(resolve, 500));
+        } catch (pairError) {
+          console.error(`Error fetching data for ${pair}:`, pairError);
+          // Continue with other pairs
+        }
       }
-      
-      // If we've hit API limits, use demo data
-      if (checkForRateLimit(data)) {
-        toast.warning('API limit reached, using demo data instead');
-        return generateDemoTradeSignals();
-      }
-      
-      // Get the time series data if available
-      const timeSeriesData = data['Time Series FX (Daily)'];
-      if (!timeSeriesData) {
-        throw new Error('No time series data available');
-      }
-      
-      // Determine if we're in an uptrend or downtrend
-      const dates = Object.keys(timeSeriesData).slice(0, 10);
-      const latestData = timeSeriesData[dates[0]];
-      const yesterdayData = timeSeriesData[dates[1]];
-      
-      const latestClose = parseFloat(latestData['4. close']);
-      const yesterdayClose = parseFloat(yesterdayData['4. close']);
-      
-      // Determine if we're in an uptrend or downtrend
-      const trend = latestClose > yesterdayClose ? 'buy' : 'sell';
-      
-      // Generate signals across different time frame classifications
-      const signals: TradeSignal[] = [];
-      let idCounter = 1;
-      
-      // Generate primary timeframe signals
-      TIME_FRAMES.primary.forEach(timeframe => {
-        // Focus on market structure and liquidity zones in primary timeframe
-        const isPotentialInducement = Math.random() > 0.7;
-        if (isPotentialInducement) {
-          const pair = CURRENCY_PAIRS[Math.floor(Math.random() * CURRENCY_PAIRS.length)];
-          const direction = trend === 'buy' ? 'sell' : 'buy'; // Counter-trend for inducement
-          const basePrice = calculateBasePriceForPair(latestClose, pair);
-          
-          signals.push({
-            id: idCounter++,
-            pair,
-            direction,
-            pattern: 'Liquidity Zone',
-            entry: basePrice.toFixed(pair.includes('JPY') ? 2 : 4),
-            stopLoss: calculateStopLoss(basePrice, direction, 0.002, pair),
-            takeProfit: calculateTakeProfit(basePrice, direction, 0.004, pair),
-            probability: 'high',
-            timeframe,
-            signalType: direction === 'buy' ? 'discount' : 'premium',
-            analysisTimeframe: 'primary',
-            confirmationStatus: 'watching'
-          });
-        }
-        
-        // Generate one FVG signal for counter-trend move
-        if (Math.random() > 0.5) {
-          const pair = CURRENCY_PAIRS[Math.floor(Math.random() * CURRENCY_PAIRS.length)];
-          const direction = trend === 'buy' ? 'buy' : 'sell'; // With trend for FVG
-          const basePrice = calculateBasePriceForPair(latestClose, pair);
-          
-          signals.push({
-            id: idCounter++,
-            pair,
-            direction,
-            pattern: 'Fair Value Gap',
-            entry: basePrice.toFixed(pair.includes('JPY') ? 2 : 4),
-            stopLoss: calculateStopLoss(basePrice, direction, 0.0025, pair),
-            takeProfit: calculateTakeProfit(basePrice, direction, 0.005, pair), // Target is equilibrium
-            probability: 'medium',
-            timeframe,
-            signalType: 'equilibrium',
-            analysisTimeframe: 'primary',
-            confirmationStatus: 'confirmed',
-            fibLevel: '50.0%'
-          });
-        }
-      });
-      
-      // Generate secondary timeframe signals
-      TIME_FRAMES.secondary.forEach(timeframe => {
-        // Focus on FVGs and Order blocks
-        const isPotentialFVG = Math.random() > 0.4;
-        if (isPotentialFVG) {
-          const pair = CURRENCY_PAIRS[Math.floor(Math.random() * CURRENCY_PAIRS.length)];
-          const direction = Math.random() > 0.5 ? 'buy' : 'sell';
-          const basePrice = calculateBasePriceForPair(latestClose, pair);
-          
-          signals.push({
-            id: idCounter++,
-            pair,
-            direction,
-            pattern: Math.random() > 0.5 ? 'Fair Value Gap' : 'Order Block',
-            entry: basePrice.toFixed(pair.includes('JPY') ? 2 : 4),
-            stopLoss: calculateStopLoss(basePrice, direction, 0.0015, pair),
-            takeProfit: calculateTakeProfit(basePrice, direction, 0.003, pair),
-            probability: 'medium',
-            timeframe,
-            signalType: direction === 'buy' ? 'discount' : 'premium',
-            analysisTimeframe: 'secondary',
-            confirmationStatus: Math.random() > 0.5 ? 'confirmed' : 'pending',
-            fibLevel: Math.random() > 0.5 ? '61.8%' : '78.6%'
-          });
-        }
-      });
-      
-      // Generate lower timeframe signals
-      TIME_FRAMES.lower.forEach(timeframe => {
-        // Focus on CHOCH signals
-        const isPotentialCHOCH = Math.random() > 0.6;
-        if (isPotentialCHOCH) {
-          const pair = CURRENCY_PAIRS[Math.floor(Math.random() * CURRENCY_PAIRS.length)];
-          const direction = Math.random() > 0.5 ? 'buy' : 'sell';
-          const basePrice = calculateBasePriceForPair(latestClose, pair);
-          
-          signals.push({
-            id: idCounter++,
-            pair,
-            direction,
-            pattern: 'CHOCH',
-            entry: basePrice.toFixed(pair.includes('JPY') ? 2 : 4),
-            stopLoss: calculateStopLoss(basePrice, direction, 0.001, pair),
-            takeProfit: calculateTakeProfit(basePrice, direction, 0.003, pair),
-            probability: 'high',
-            timeframe,
-            signalType: 'choch',
-            analysisTimeframe: 'lower',
-            confirmationStatus: 'confirmed'
-          });
-        }
-      });
       
       // Sort signals by probability (high first)
-      signals.sort((a, b) => {
-        const probabilityOrder = {
-          high: 1,
-          medium: 2,
-          low: 3
-        };
+      allSignals.sort((a, b) => {
+        const probabilityOrder = { high: 1, medium: 2, low: 3 };
         return probabilityOrder[a.probability] - probabilityOrder[b.probability];
       });
       
-      return signals;
+      console.log(`Generated ${allSignals.length} total signals from live market data`);
+      return allSignals.length > 0 ? allSignals : generateDemoTradeSignals();
+      
     } catch (error) {
-      console.error('Error fetching trade signals:', error);
-      toast.error('Failed to fetch trade signals');
+      console.error('Error fetching live trade signals:', error);
+      toast.error('Failed to fetch live trade signals, using demo data');
       emitRateLimitEvent();
       return generateDemoTradeSignals();
     }
@@ -781,4 +829,41 @@ function generateDemoSMCPatterns(): SMCPattern[] {
       pair: CURRENCY_PAIRS[Math.floor(Math.random() * CURRENCY_PAIRS.length)],
       timeframe,
       zoneType: pattern.zoneType,
-      direction: Math.
+      direction: Math.random() > 0.5 ? 'bullish' : 'bearish'
+    });
+  });
+  
+  // Secondary timeframes
+  TIME_FRAMES.secondary.forEach(timeframe => {
+    const pattern = demoPatterns[patternIndex % demoPatterns.length];
+    patternIndex++;
+    
+    patterns.push({
+      name: pattern.name,
+      description: pattern.description,
+      status: Math.random() > 0.6 ? 'Active' : 'Watching',
+      pair: CURRENCY_PAIRS[Math.floor(Math.random() * CURRENCY_PAIRS.length)],
+      timeframe,
+      zoneType: pattern.zoneType,
+      direction: Math.random() > 0.5 ? 'bullish' : 'bearish'
+    });
+  });
+  
+  // Lower timeframes
+  TIME_FRAMES.lower.forEach(timeframe => {
+    const pattern = demoPatterns[patternIndex % demoPatterns.length];
+    patternIndex++;
+    
+    patterns.push({
+      name: pattern.name,
+      description: pattern.description,
+      status: Math.random() > 0.6 ? 'Active' : 'Watching',
+      pair: CURRENCY_PAIRS[Math.floor(Math.random() * CURRENCY_PAIRS.length)],
+      timeframe,
+      zoneType: pattern.zoneType,
+      direction: Math.random() > 0.5 ? 'bullish' : 'bearish'
+    });
+  });
+  
+  return patterns;
+}
