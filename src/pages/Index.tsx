@@ -24,7 +24,7 @@ const Index = () => {
   const [dataProvider, setDataProvider] = useState('demo');
   const [rateLimitReached, setRateLimitReached] = useState(false);
   const [chartData, setChartData] = useState<ChartDataPoint[]>([]);
-  const [currentPair, setCurrentPair] = useState('EURUSD');
+  const [currentPair, setCurrentPair] = useState('GBPUSD');
   const [isChartLoading, setIsChartLoading] = useState(false);
   
   // Check data provider on component mount and if it changes
@@ -63,17 +63,17 @@ const Index = () => {
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
-                <div className="flex items-center">
+                <div className="flex items-center gap-2">
                   <Badge 
                     variant={dataProvider === 'alphavantage' ? 'default' : 'outline'}
-                    className="gap-1 cursor-help"
+                    className="gap-1 cursor-help bg-blue-500"
                   >
                     <Info className="h-3 w-3" />
-                    {dataProvider === 'alphavantage' ? 'Live Data' : 'Demo Data'}
+                    Live Data
                   </Badge>
                   
                   {rateLimitReached && (
-                    <Badge variant="destructive" className="ml-2">
+                    <Badge variant="destructive" className="bg-orange-500">
                       API Limit Reached
                     </Badge>
                   )}

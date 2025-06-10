@@ -14,7 +14,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { TradeSignal } from '@/services/marketDataService';
+import { TradeSignal, marketDataService } from '@/services/marketDataService';
 import { toast } from 'sonner';
 
 interface ChartDataPoint {
@@ -42,7 +42,7 @@ const TradeSuggestions: React.FC<TradeSuggestionsProps> = ({
   const [tradeSuggestions, setTradeSuggestions] = useState<TradeSignal[]>([]);
   const [filteredSuggestions, setFilteredSuggestions] = useState<TradeSignal[]>([]);
   const [currencyPairFilter, setCurrencyPairFilter] = useState<string | null>(null);
-  const [isUsingDemoData, setIsUsingDemoData] = useState(false);
+  const [isLoadingSignals, setIsLoadingSignals] = useState(false);
   const [probabilityFilter, setProbabilityFilter] = useState<{
     high: boolean;
     medium: boolean;
@@ -65,159 +65,24 @@ const TradeSuggestions: React.FC<TradeSuggestionsProps> = ({
   
   const [probabilityPopoverOpen, setProbabilityPopoverOpen] = useState(false);
   const { toast: useToastHook } = useToast();
-  
-  // Analyze chart data for SMC patterns and generate trade signals
-  const analyzeChartData = (data: ChartDataPoint[], pair: string): TradeSignal[] => {
-    if (!data || data.length < 3) return [];
-    
-    const signals: TradeSignal[] = [];
-    let idCounter = Math.floor(Math.random() * 1000);
-    
-    // Get recent price data (last 5 candles)
-    const recentData = data.slice(-5);
-    const latest = recentData[recentData.length - 1];
-    const previous = recentData[recentData.length - 2];
-    
-    if (!latest || !previous) return [];
-    
-    // Determine trend based on recent price action
-    const priceChange = latest.close - previous.close;
-    const isUptrend = priceChange > 0;
-    const volatility = Math.abs(priceChange / previous.close);
-    
-    // Look for Fair Value Gaps (price gaps)
-    for (let i = 0; i < recentData.length - 2; i++) {
-      const candle1 = recentData[i];
-      const candle2 = recentData[i + 1];
-      const candle3 = recentData[i + 2];
-      
-      // Bullish FVG: candle1.low > candle3.high
-      if (candle1.low > candle3.high && isUptrend) {
-        const gapMidpoint = (candle1.low + candle3.high) / 2;
-        signals.push({
-          id: idCounter++,
-          pair,
-          direction: 'buy',
-          pattern: 'Fair Value Gap',
-          entry: gapMidpoint.toFixed(pair.includes('JPY') ? 2 : 4),
-          stopLoss: (gapMidpoint * 0.998).toFixed(pair.includes('JPY') ? 2 : 4),
-          takeProfit: (gapMidpoint * 1.006).toFixed(pair.includes('JPY') ? 2 : 4),
-          probability: volatility > 0.01 ? 'high' : 'medium',
-          timeframe: '1H',
-          signalType: 'discount',
-          analysisTimeframe: 'primary',
-          confirmationStatus: 'confirmed',
-          fibLevel: '61.8%'
-        });
-      }
-      
-      // Bearish FVG: candle1.high < candle3.low
-      if (candle1.high < candle3.low && !isUptrend) {
-        const gapMidpoint = (candle1.high + candle3.low) / 2;
-        signals.push({
-          id: idCounter++,
-          pair,
-          direction: 'sell',
-          pattern: 'Fair Value Gap',
-          entry: gapMidpoint.toFixed(pair.includes('JPY') ? 2 : 4),
-          stopLoss: (gapMidpoint * 1.002).toFixed(pair.includes('JPY') ? 2 : 4),
-          takeProfit: (gapMidpoint * 0.994).toFixed(pair.includes('JPY') ? 2 : 4),
-          probability: volatility > 0.01 ? 'high' : 'medium',
-          timeframe: '1H',
-          signalType: 'premium',
-          analysisTimeframe: 'primary',
-          confirmationStatus: 'confirmed',
-          fibLevel: '61.8%'
-        });
-      }
-    }
 
-    // Look for Order Blocks (significant price moves)
-    for (let i = 0; i < recentData.length - 1; i++) {
-      const candle = recentData[i];
-      const bodySize = Math.abs(candle.close - candle.open);
-      const shadowSize = candle.high - candle.low;
+  // Fetch trade signals for all currency pairs
+  const fetchAllTradeSignals = async () => {
+    setIsLoadingSignals(true);
+    try {
+      // Use the market data service to get signals for all pairs
+      const signals = await marketDataService.fetchTradeSignals();
+      setTradeSuggestions(signals);
       
-      // Strong bullish candle with small shadows
-      if (candle.close > candle.open && bodySize > shadowSize * 0.7 && isUptrend) {
-        signals.push({
-          id: idCounter++,
-          pair,
-          direction: 'buy',
-          pattern: 'Order Block',
-          entry: candle.open.toFixed(pair.includes('JPY') ? 2 : 4),
-          stopLoss: (candle.low * 0.999).toFixed(pair.includes('JPY') ? 2 : 4),
-          takeProfit: (candle.high * 1.002).toFixed(pair.includes('JPY') ? 2 : 4),
-          probability: volatility > 0.008 ? 'high' : 'medium',
-          timeframe: '4H',
-          signalType: 'discount',
-          analysisTimeframe: 'primary',
-          confirmationStatus: 'watching'
-        });
+      if (signals.length > 0) {
+        toast.success(`Found ${signals.length} SMC signals across all currency pairs`);
       }
-      
-      // Strong bearish candle
-      if (candle.close < candle.open && bodySize > shadowSize * 0.7 && !isUptrend) {
-        signals.push({
-          id: idCounter++,
-          pair,
-          direction: 'sell',
-          pattern: 'Order Block',
-          entry: candle.open.toFixed(pair.includes('JPY') ? 2 : 4),
-          stopLoss: (candle.high * 1.001).toFixed(pair.includes('JPY') ? 2 : 4),
-          takeProfit: (candle.low * 0.998).toFixed(pair.includes('JPY') ? 2 : 4),
-          probability: volatility > 0.008 ? 'high' : 'medium',
-          timeframe: '4H',
-          signalType: 'premium',
-          analysisTimeframe: 'primary',
-          confirmationStatus: 'watching'
-        });
-      }
+    } catch (error) {
+      console.error('Error fetching trade signals:', error);
+      toast.error('Failed to fetch trade signals');
+    } finally {
+      setIsLoadingSignals(false);
     }
-
-    // Look for Break of Structure
-    const highs = recentData.map(d => d.high);
-    const lows = recentData.map(d => d.low);
-    const recentHigh = Math.max(...highs.slice(0, 3));
-    const recentLow = Math.min(...lows.slice(0, 3));
-    
-    // Bullish BOS - price breaking above recent high
-    if (latest.high > recentHigh && isUptrend) {
-      signals.push({
-        id: idCounter++,
-        pair,
-        direction: 'buy',
-        pattern: 'Break of Structure',
-        entry: recentHigh.toFixed(pair.includes('JPY') ? 2 : 4),
-        stopLoss: (recentHigh * 0.997).toFixed(pair.includes('JPY') ? 2 : 4),
-        takeProfit: (recentHigh * 1.008).toFixed(pair.includes('JPY') ? 2 : 4),
-        probability: 'high',
-        timeframe: '15M',
-        signalType: 'choch',
-        analysisTimeframe: 'secondary',
-        confirmationStatus: 'confirmed'
-      });
-    }
-    
-    // Bearish BOS - price breaking below recent low
-    if (latest.low < recentLow && !isUptrend) {
-      signals.push({
-        id: idCounter++,
-        pair,
-        direction: 'sell',
-        pattern: 'Break of Structure',
-        entry: recentLow.toFixed(pair.includes('JPY') ? 2 : 4),
-        stopLoss: (recentLow * 1.003).toFixed(pair.includes('JPY') ? 2 : 4),
-        takeProfit: (recentLow * 0.992).toFixed(pair.includes('JPY') ? 2 : 4),
-        probability: 'high',
-        timeframe: '15M',
-        signalType: 'choch',
-        analysisTimeframe: 'secondary',
-        confirmationStatus: 'confirmed'
-      });
-    }
-
-    return signals;
   };
   
   // Helper function to get numerical priority for probability (for sorting)
@@ -230,18 +95,10 @@ const TradeSuggestions: React.FC<TradeSuggestionsProps> = ({
     }
   };
   
-  // Update trade signals when chart data changes
+  // Fetch signals on component mount and when data provider changes
   useEffect(() => {
-    if (chartData && chartData.length > 0) {
-      const signals = analyzeChartData(chartData, currentPair);
-      setTradeSuggestions(signals);
-      setIsUsingDemoData(dataProvider === 'demo');
-      
-      if (signals.length > 0) {
-        toast.success(`Found ${signals.length} SMC signals for ${currentPair}`);
-      }
-    }
-  }, [chartData, currentPair, dataProvider]);
+    fetchAllTradeSignals();
+  }, [dataProvider]);
   
   useEffect(() => {
     // Apply filters whenever they change
@@ -316,11 +173,19 @@ const TradeSuggestions: React.FC<TradeSuggestionsProps> = ({
       <div className="flex justify-between items-center mb-4">
         <div className="flex items-center gap-2">
           <h2 className="text-lg font-semibold">SMC Trade Signals</h2>
-          <Badge variant={dataProvider === 'alphavantage' ? 'default' : 'outline'}>
-            {dataProvider === 'alphavantage' ? 'Live Analysis' : 'Demo Analysis'}
+          <Badge variant="default" className="bg-blue-500">
+            Live Analysis
           </Badge>
         </div>
         <div className="flex items-center space-x-2">
+          <Button 
+            onClick={fetchAllTradeSignals} 
+            disabled={isLoadingSignals}
+            variant="outline" 
+            size="sm"
+          >
+            {isLoadingSignals ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Refresh'}
+          </Button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" size="sm" className="flex items-center gap-1">
@@ -483,10 +348,10 @@ const TradeSuggestions: React.FC<TradeSuggestionsProps> = ({
         </div>
       )}
       
-      {isLoading ? (
+      {isLoadingSignals ? (
         <div className="flex flex-col items-center justify-center h-64">
           <Loader2 className="h-8 w-8 animate-spin text-primary mb-2" />
-          <p className="text-muted-foreground">Analyzing chart patterns...</p>
+          <p className="text-muted-foreground">Fetching live trade signals...</p>
         </div>
       ) : (
         <div className="space-y-4">
@@ -545,11 +410,11 @@ const TradeSuggestions: React.FC<TradeSuggestionsProps> = ({
           ) : (
             <div className="text-center py-8">
               <p className="text-muted-foreground">
-                {chartData && chartData.length > 0 
-                  ? "No SMC patterns detected in current chart data."
-                  : "Waiting for chart data to analyze..."}
+                {tradeSuggestions.length > 0 
+                  ? "No signals match your current filters."
+                  : "No SMC signals available at the moment."}
               </p>
-              {chartData && chartData.length > 0 && (
+              {tradeSuggestions.length > 0 && (
                 <Button variant="outline" size="sm" className="mt-2" onClick={clearFilters}>
                   Clear Filters
                 </Button>

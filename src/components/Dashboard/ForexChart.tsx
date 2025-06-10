@@ -40,7 +40,7 @@ interface ForexChartProps {
 }
 
 const ForexChart: React.FC<ForexChartProps> = ({ onDataUpdate }) => {
-  const [currencyPair, setCurrencyPair] = useState('EURUSD');
+  const [currencyPair, setCurrencyPair] = useState('GBPUSD');
   const [timeframe, setTimeframe] = useState('D');
   const [chartData, setChartData] = useState<ChartDataPoint[]>([]);
   const [loading, setLoading] = useState(false);
@@ -294,11 +294,11 @@ const ForexChart: React.FC<ForexChartProps> = ({ onDataUpdate }) => {
   };
 
   return (
-    <div className="bg-card rounded-lg p-4 shadow-md">
+    <div className="bg-card rounded-lg p-4 shadow-md h-full">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-4 space-y-2 md:space-y-0">
         <div className="flex items-center gap-2">
           <h2 className="text-xl font-bold">{currencyPair.slice(0, 3)}/{currencyPair.slice(3)}</h2>
-          <Badge variant={dataProvider === 'alphavantage' ? 'default' : 'outline'}>
+          <Badge variant="default" className="bg-blue-500">
             Live Chart
           </Badge>
         </div>
@@ -357,7 +357,7 @@ const ForexChart: React.FC<ForexChartProps> = ({ onDataUpdate }) => {
         </div>
       )}
       
-      <div className="h-[400px] w-full" ref={chartContainerRef}>
+      <div className="h-[400px] w-full relative" ref={chartContainerRef}>
         {/* TradingView widget will be inserted here */}
       </div>
       
