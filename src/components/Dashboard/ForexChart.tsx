@@ -1,11 +1,9 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useToast } from '@/hooks/use-toast';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, ResponsiveContainer } from 'recharts';
 import { marketDataService } from '@/services/marketDataService';
 import { Loader2, TrendingUp, TrendingDown } from 'lucide-react';
 
@@ -20,11 +18,12 @@ const currencyPairs = [
 ];
 
 const timeframes = [
-  { value: '1min', label: '1 Minute' },
-  { value: '5min', label: '5 Minutes' },
-  { value: '15min', label: '15 Minutes' },
-  { value: '60min', label: '1 Hour' },
-  { value: 'daily', label: 'Daily' },
+  { value: '1', label: '1 Minute' },
+  { value: '5', label: '5 Minutes' },
+  { value: '15', label: '15 Minutes' },
+  { value: '60', label: '1 Hour' },
+  { value: '240', label: '4 Hours' },
+  { value: 'D', label: 'Daily' },
 ];
 
 interface ChartDataPoint {
@@ -42,13 +41,75 @@ interface ForexChartProps {
 
 const ForexChart: React.FC<ForexChartProps> = ({ onDataUpdate }) => {
   const [currencyPair, setCurrencyPair] = useState('EURUSD');
-  const [timeframe, setTimeframe] = useState('daily');
+  const [timeframe, setTimeframe] = useState('D');
   const [chartData, setChartData] = useState<ChartDataPoint[]>([]);
   const [loading, setLoading] = useState(false);
   const [currentPrice, setCurrentPrice] = useState<number | null>(null);
   const [priceChange, setPriceChange] = useState<number | null>(null);
   const [dataProvider, setDataProvider] = useState('demo');
+  const chartContainerRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
+
+  // Initialize TradingView widget
+  useEffect(() => {
+    if (chartContainerRef.current) {
+      // Clear previous widget
+      chartContainerRef.current.innerHTML = '';
+      
+      // Create TradingView widget script
+      const script = document.createElement('script');
+      script.src = 'https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js';
+      script.type = 'text/javascript';
+      script.async = true;
+      script.innerHTML = JSON.stringify({
+        "autosize": true,
+        "symbol": `FX:${currencyPair}`,
+        "interval": timeframe,
+        "timezone": "Etc/UTC",
+        "theme": "dark",
+        "style": "1",
+        "locale": "en",
+        "enable_publishing": false,
+        "backgroundColor": "rgba(0, 0, 0, 0)",
+        "gridColor": "rgba(240, 243, 250, 0.06)",
+        "hide_top_toolbar": false,
+        "hide_legend": false,
+        "save_image": false,
+        "container_id": "tradingview_chart",
+        "studies": [
+          "STD;SMA",
+          "STD;EMA"
+        ],
+        "toolbar_bg": "#f1f3f6",
+        "withdateranges": true,
+        "hide_side_toolbar": false,
+        "allow_symbol_change": false,
+        "details": true,
+        "hotlist": true,
+        "calendar": true,
+        "show_popup_button": true,
+        "popup_width": "1000",
+        "popup_height": "650",
+        "studies_overrides": {}
+      });
+
+      // Create container for TradingView widget
+      const widgetContainer = document.createElement('div');
+      widgetContainer.className = 'tradingview-widget-container';
+      widgetContainer.style.height = '100%';
+      widgetContainer.style.width = '100%';
+      
+      const widgetDiv = document.createElement('div');
+      widgetDiv.id = 'tradingview_chart';
+      widgetDiv.style.height = '100%';
+      widgetDiv.style.width = '100%';
+      
+      widgetContainer.appendChild(widgetDiv);
+      widgetContainer.appendChild(script);
+      
+      chartContainerRef.current.appendChild(widgetContainer);
+    }
+  }, [currencyPair, timeframe]);
 
   const fetchChartData = async () => {
     setLoading(true);
@@ -76,15 +137,15 @@ const ForexChart: React.FC<ForexChartProps> = ({ onDataUpdate }) => {
         return;
       }
 
-      // Fetch live data from Alpha Vantage
+      // Fetch live data from Alpha Vantage for trade signals
       const baseCurrency = currencyPair.slice(0, 3);
       const quoteCurrency = currencyPair.slice(3);
       
       let apiFunction = 'FX_DAILY';
-      if (timeframe === '1min') apiFunction = 'FX_INTRADAY&interval=1min';
-      else if (timeframe === '5min') apiFunction = 'FX_INTRADAY&interval=5min';
-      else if (timeframe === '15min') apiFunction = 'FX_INTRADAY&interval=15min';
-      else if (timeframe === '60min') apiFunction = 'FX_INTRADAY&interval=60min';
+      if (timeframe === '1') apiFunction = 'FX_INTRADAY&interval=1min';
+      else if (timeframe === '5') apiFunction = 'FX_INTRADAY&interval=5min';
+      else if (timeframe === '15') apiFunction = 'FX_INTRADAY&interval=15min';
+      else if (timeframe === '60') apiFunction = 'FX_INTRADAY&interval=60min';
 
       const response = await fetch(
         `https://www.alphavantage.co/query?function=${apiFunction}&from_symbol=${baseCurrency}&to_symbol=${quoteCurrency}&apikey=AP4TB68V97NKRA53`
@@ -98,7 +159,7 @@ const ForexChart: React.FC<ForexChartProps> = ({ onDataUpdate }) => {
         console.warn('API rate limit reached for chart data');
         toast({
           title: "API Limit Reached",
-          description: "Using demo chart data instead",
+          description: "Chart displaying live data, but using demo data for signals",
           variant: "destructive"
         });
         const demoData = generateDemoChartData();
@@ -115,8 +176,14 @@ const ForexChart: React.FC<ForexChartProps> = ({ onDataUpdate }) => {
 
       // Parse the time series data
       let timeSeriesKey = 'Time Series FX (Daily)';
-      if (timeframe.includes('min')) {
-        timeSeriesKey = `Time Series FX (${timeframe === '1min' ? '1min' : timeframe === '5min' ? '5min' : timeframe === '15min' ? '15min' : '60min'})`;
+      if (timeframe !== 'D') {
+        const intervalMap: { [key: string]: string } = {
+          '1': '1min',
+          '5': '5min', 
+          '15': '15min',
+          '60': '60min'
+        };
+        timeSeriesKey = `Time Series FX (${intervalMap[timeframe]})`;
       }
 
       const timeSeries = data[timeSeriesKey];
@@ -152,18 +219,18 @@ const ForexChart: React.FC<ForexChartProps> = ({ onDataUpdate }) => {
 
       toast({
         title: "Live Data Loaded",
-        description: `Chart updated with Alpha Vantage data for ${currencyPair}`,
+        description: `Chart and signals updated with live data for ${currencyPair}`,
       });
 
     } catch (error) {
       console.error('Error fetching chart data:', error);
       toast({
-        title: "Error Loading Chart",
-        description: "Using demo data instead",
+        title: "Error Loading Data",
+        description: "Chart showing live data, using demo data for signals",
         variant: "destructive"
       });
       
-      // Fallback to demo data
+      // Fallback to demo data for signals
       const demoData = generateDemoChartData();
       setChartData(demoData);
       setCurrentPrice(demoData[demoData.length - 1]?.close || 0);
@@ -217,11 +284,13 @@ const ForexChart: React.FC<ForexChartProps> = ({ onDataUpdate }) => {
     });
   };
 
-  const chartConfig = {
-    close: {
-      label: "Close Price",
-      color: "hsl(var(--chart-1))",
-    },
+  const handleTimeframeChange = (value: string) => {
+    setTimeframe(value);
+    toast({
+      title: "Timeframe Changed",
+      description: `Chart updated to ${timeframes.find(tf => tf.value === value)?.label}`,
+      duration: 2000,
+    });
   };
 
   return (
@@ -230,7 +299,7 @@ const ForexChart: React.FC<ForexChartProps> = ({ onDataUpdate }) => {
         <div className="flex items-center gap-2">
           <h2 className="text-xl font-bold">{currencyPair.slice(0, 3)}/{currencyPair.slice(3)}</h2>
           <Badge variant={dataProvider === 'alphavantage' ? 'default' : 'outline'}>
-            {dataProvider === 'alphavantage' ? 'Live' : 'Demo'}
+            Live Chart
           </Badge>
         </div>
         
@@ -248,7 +317,7 @@ const ForexChart: React.FC<ForexChartProps> = ({ onDataUpdate }) => {
             </SelectContent>
           </Select>
           
-          <Select value={timeframe} onValueChange={setTimeframe}>
+          <Select value={timeframe} onValueChange={handleTimeframeChange}>
             <SelectTrigger className="w-[140px]">
               <SelectValue />
             </SelectTrigger>
@@ -267,7 +336,7 @@ const ForexChart: React.FC<ForexChartProps> = ({ onDataUpdate }) => {
             variant="outline" 
             size="sm"
           >
-            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Refresh'}
+            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Refresh Data'}
           </Button>
         </div>
       </div>
@@ -288,31 +357,8 @@ const ForexChart: React.FC<ForexChartProps> = ({ onDataUpdate }) => {
         </div>
       )}
       
-      <div className="h-[400px] w-full">
-        {loading ? (
-          <div className="flex items-center justify-center h-full">
-            <Loader2 className="h-8 w-8 animate-spin" />
-          </div>
-        ) : (
-          <ChartContainer config={chartConfig}>
-            <LineChart data={chartData}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="time" />
-              <YAxis 
-                domain={['dataMin - 0.001', 'dataMax + 0.001']}
-                tickFormatter={(value) => value.toFixed(currencyPair.includes('JPY') ? 2 : 4)}
-              />
-              <ChartTooltip content={<ChartTooltipContent />} />
-              <Line 
-                type="monotone" 
-                dataKey="close" 
-                stroke="var(--color-close)" 
-                strokeWidth={2}
-                dot={false}
-              />
-            </LineChart>
-          </ChartContainer>
-        )}
+      <div className="h-[400px] w-full" ref={chartContainerRef}>
+        {/* TradingView widget will be inserted here */}
       </div>
       
       <div className="mt-4 flex flex-wrap gap-2">
