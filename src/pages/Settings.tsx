@@ -17,7 +17,7 @@ const Settings = () => {
   const { toast } = useToast();
   const [dataProvider, setDataProvider] = useState('fcs');
   const [realTimeData, setRealTimeData] = useState(true);
-  const [fcsApiKey, setFcsApiKey] = useState('');
+  const [fcsApiKey, setFcsApiKey] = useState('hczDhp413qSmqzjLlVNuhRuFdwuJv');
   
   // Load current settings
   useEffect(() => {
@@ -25,7 +25,7 @@ const Settings = () => {
     setDataProvider(currentProvider);
     setRealTimeData(currentProvider !== 'demo');
     
-    // Load FCS API key from localStorage
+    // Load FCS API key from localStorage or use the configured one
     const savedFcsKey = localStorage.getItem('fcs_api_key');
     if (savedFcsKey) {
       setFcsApiKey(savedFcsKey);
@@ -238,8 +238,8 @@ const Settings = () => {
                       onChange={handleFcsApiKeyChange}
                       placeholder="Enter your FCS API key" 
                     />
-                    <p className="text-xs text-muted-foreground">
-                      Get your free API key from <a href="https://fcsapi.com" target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">fcsapi.com</a>
+                    <p className="text-xs text-green-600">
+                      ✓ FCS API key is configured and ready to use
                     </p>
                   </div>
                 )}

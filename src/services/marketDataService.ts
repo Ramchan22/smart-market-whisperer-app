@@ -1,9 +1,10 @@
+
 import { toast } from 'sonner';
 
 // API configuration
 const API_CONFIG = {
   ALPHA_VANTAGE_API_KEY: 'AP4TB68V97NKRA53', // Alpha Vantage API key
-  FCS_API_KEY: 'YOUR_FCS_API_KEY', // FCS API key - user needs to set this
+  FCS_API_KEY: 'hczDhp413qSmqzjLlVNuhRuFdwuJv', // FCS API key
   ALPHA_VANTAGE_BASE_URL: 'https://www.alphavantage.co/query',
   FCS_BASE_URL: 'https://fcsapi.com/api-v3',
   DATA_PROVIDER: 'fcs' // Default to FCS for better rate limits
