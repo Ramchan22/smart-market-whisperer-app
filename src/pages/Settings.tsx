@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import Header from '@/components/Layout/Header';
 import Footer from '@/components/Layout/Footer';
@@ -16,19 +15,31 @@ import { marketDataService } from '@/services/marketDataService';
 
 const Settings = () => {
   const { toast } = useToast();
-  const [dataProvider, setDataProvider] = useState('alphavantage');
+  const [dataProvider, setDataProvider] = useState('fcs');
   const [realTimeData, setRealTimeData] = useState(true);
+  const [fcsApiKey, setFcsApiKey] = useState('');
   
   // Load current settings
   useEffect(() => {
     const currentProvider = marketDataService.getDataProvider();
     setDataProvider(currentProvider);
-    setRealTimeData(currentProvider === 'alphavantage');
+    setRealTimeData(currentProvider !== 'demo');
+    
+    // Load FCS API key from localStorage
+    const savedFcsKey = localStorage.getItem('fcs_api_key');
+    if (savedFcsKey) {
+      setFcsApiKey(savedFcsKey);
+    }
   }, []);
 
   const handleSave = () => {
     // Save all settings
     marketDataService.setDataProvider(dataProvider);
+    
+    // Save FCS API key if provided
+    if (fcsApiKey && fcsApiKey !== 'YOUR_FCS_API_KEY') {
+      marketDataService.setFCSApiKey(fcsApiKey);
+    }
     
     toast({
       title: "Settings saved",
@@ -38,7 +49,11 @@ const Settings = () => {
   
   const handleDataProviderChange = (value: string) => {
     setDataProvider(value);
-    setRealTimeData(value === 'alphavantage');
+    setRealTimeData(value !== 'demo');
+  };
+
+  const handleFcsApiKeyChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setFcsApiKey(e.target.value);
   };
 
   return (
@@ -194,14 +209,6 @@ const Settings = () => {
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="space-y-2">
-                  <Label htmlFor="api-key">API Key</Label>
-                  <Input id="api-key" type="password" value={marketDataService.getApiKey()} readOnly placeholder="Enter your API key" />
-                  <p className="text-xs text-muted-foreground">
-                    Used for live market data access
-                  </p>
-                </div>
-                
-                <div className="space-y-2">
                   <Label htmlFor="data-provider">Data Provider</Label>
                   <Select 
                     value={dataProvider} 
@@ -211,13 +218,41 @@ const Settings = () => {
                       <SelectValue placeholder="Select provider" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="alphavantage">Alpha Vantage (Live)</SelectItem>
+                      <SelectItem value="fcs">FCS API (Recommended - Better Rate Limits)</SelectItem>
+                      <SelectItem value="alphavantage">Alpha Vantage (5 requests/min limit)</SelectItem>
                       <SelectItem value="demo">Demo (Sample Data)</SelectItem>
-                      <SelectItem value="oanda">Oanda</SelectItem>
-                      <SelectItem value="fxcm">FXCM</SelectItem>
                     </SelectContent>
                   </Select>
+                  <p className="text-xs text-muted-foreground">
+                    FCS API supports batched requests for all currency pairs in one call, avoiding rate limits.
+                  </p>
                 </div>
+
+                {dataProvider === 'fcs' && (
+                  <div className="space-y-2">
+                    <Label htmlFor="fcs-api-key">FCS API Key</Label>
+                    <Input 
+                      id="fcs-api-key" 
+                      type="password" 
+                      value={fcsApiKey}
+                      onChange={handleFcsApiKeyChange}
+                      placeholder="Enter your FCS API key" 
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Get your free API key from <a href="https://fcsapi.com" target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">fcsapi.com</a>
+                    </p>
+                  </div>
+                )}
+
+                {dataProvider === 'alphavantage' && (
+                  <div className="space-y-2">
+                    <Label htmlFor="alpha-api-key">Alpha Vantage API Key</Label>
+                    <Input id="alpha-api-key" type="password" value={marketDataService.getApiKey()} readOnly placeholder="Enter your API key" />
+                    <p className="text-xs text-muted-foreground">
+                      Note: Alpha Vantage has a 5 requests/minute limit on free tier
+                    </p>
+                  </div>
+                )}
                 
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
@@ -227,16 +262,26 @@ const Settings = () => {
                       checked={realTimeData}
                       onCheckedChange={(checked) => {
                         setRealTimeData(checked);
-                        setDataProvider(checked ? 'alphavantage' : 'demo');
+                        setDataProvider(checked ? 'fcs' : 'demo');
                       }}
                     />
                   </div>
                   <p className="text-xs text-muted-foreground">
                     {realTimeData 
-                      ? "Live trading data is enabled with your Alpha Vantage API key" 
+                      ? `Live trading data is enabled with ${dataProvider === 'fcs' ? 'FCS API' : 'Alpha Vantage API'}` 
                       : "Using demo data mode (no API calls)"}
                   </p>
                 </div>
+
+                {dataProvider !== 'demo' && (
+                  <div className="p-3 bg-blue-50 rounded-md">
+                    <p className="text-sm text-blue-800">
+                      <strong>Rate Limit Info:</strong><br/>
+                      • FCS API: Up to 500 requests/month (free tier)<br/>
+                      • Alpha Vantage: 5 requests/minute, 25/day (free tier)
+                    </p>
+                  </div>
+                )}
               </CardContent>
             </Card>
           </div>

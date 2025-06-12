@@ -2,9 +2,11 @@ import { toast } from 'sonner';
 
 // API configuration
 const API_CONFIG = {
-  API_KEY: 'AP4TB68V97NKRA53', // Alpha Vantage API key
-  BASE_URL: 'https://www.alphavantage.co/query',
-  DATA_PROVIDER: 'alphavantage' // Default provider
+  ALPHA_VANTAGE_API_KEY: 'AP4TB68V97NKRA53', // Alpha Vantage API key
+  FCS_API_KEY: 'YOUR_FCS_API_KEY', // FCS API key - user needs to set this
+  ALPHA_VANTAGE_BASE_URL: 'https://www.alphavantage.co/query',
+  FCS_BASE_URL: 'https://fcsapi.com/api-v3',
+  DATA_PROVIDER: 'fcs' // Default to FCS for better rate limits
 };
 
 // Track API rate limit status
@@ -16,15 +18,15 @@ const emitRateLimitEvent = () => {
     isRateLimitReached = true;
     // Dispatch a custom event that components can listen for
     window.dispatchEvent(new CustomEvent('alphavantage-rate-limit'));
-    console.warn('Alpha Vantage API rate limit reached, switching to demo data');
+    console.warn('API rate limit reached, switching to demo data');
   }
 };
 
 // Helper to check response for rate limit messages
 const checkForRateLimit = (data: any): boolean => {
-  if (data && (data['Information'] || data['Note'])) {
-    const message = data['Information'] || data['Note'];
-    if (message && message.includes('API rate limit')) {
+  if (data && (data['Information'] || data['Note'] || data['Error Message'])) {
+    const message = data['Information'] || data['Note'] || data['Error Message'];
+    if (message && (message.includes('API rate limit') || message.includes('rate limit'))) {
       emitRateLimitEvent();
       return true;
     }
@@ -85,6 +87,25 @@ const TIME_FRAMES = {
   primary: ['4H', '1H'],
   secondary: ['30M', '15M'],
   lower: ['5M', '3M']
+};
+
+// Helper function to fetch data from FCS API
+const fetchFromFCS = async (endpoint: string, params: Record<string, string> = {}) => {
+  const url = new URL(`${API_CONFIG.FCS_BASE_URL}/${endpoint}`);
+  url.searchParams.append('access_key', API_CONFIG.FCS_API_KEY);
+  
+  Object.entries(params).forEach(([key, value]) => {
+    url.searchParams.append(key, value);
+  });
+
+  const response = await fetch(url.toString());
+  const data = await response.json();
+  
+  if (!data.status && data.msg) {
+    throw new Error(data.msg);
+  }
+  
+  return data;
 };
 
 // Helper function to analyze real price data for signals
@@ -263,7 +284,7 @@ export const marketDataService = {
     }
     
     // Show toast notification
-    toast.success(`Data provider set to ${provider === 'demo' ? 'Demo (Sample Data)' : 'Alpha Vantage (Live)'}`);
+    toast.success(`Data provider set to ${provider === 'demo' ? 'Demo (Sample Data)' : provider === 'fcs' ? 'FCS API (Live)' : 'Alpha Vantage (Live)'}`);
   },
   
   // Get the current data provider
@@ -283,7 +304,7 @@ export const marketDataService = {
     toast.success('API rate limit status has been reset');
   },
 
-  // Fetch current forex rates for watchlist
+  // Fetch current forex rates for watchlist using batched requests
   fetchWatchlistData: async (): Promise<ForexRate[]> => {
     try {
       const dataProvider = marketDataService.getDataProvider();
@@ -298,12 +319,59 @@ export const marketDataService = {
         return generateDemoWatchlistData();
       }
       
-      // Use live API data
+      // Use FCS API for batched requests (better rate limits)
+      if (dataProvider === 'fcs') {
+        console.log('Fetching watchlist data from FCS API...');
+        
+        // Check if API key is set
+        if (API_CONFIG.FCS_API_KEY === 'YOUR_FCS_API_KEY') {
+          console.warn('FCS API key not configured, using demo data');
+          toast.warning('FCS API key not configured. Using demo data.');
+          return generateDemoWatchlistData();
+        }
+        
+        try {
+          // Batch request for all pairs in one call
+          const pairsString = CURRENCY_PAIRS.join(',');
+          const data = await fetchFromFCS('forex/latest', { 
+            pairs: pairsString 
+          });
+          
+          if (data.status && data.response) {
+            const rates: ForexRate[] = data.response.map((item: any) => {
+              const pair = `${item.c1}/${item.c2}`;
+              const price = parseFloat(item.p);
+              const change = parseFloat(item.ch);
+              const changePercent = parseFloat(item.cp);
+              
+              return {
+                pair,
+                bid: (price - 0.0002).toFixed(pair.includes('JPY') ? 2 : 4),
+                ask: price.toFixed(pair.includes('JPY') ? 2 : 4),
+                change: `${changePercent.toFixed(2)}%`,
+                changeDirection: change >= 0 ? 'up' : 'down'
+              };
+            });
+            
+            toast.success('Connected to FCS API live forex data');
+            return rates;
+          } else {
+            throw new Error('Invalid FCS API response');
+          }
+        } catch (fcsError) {
+          console.error('FCS API error:', fcsError);
+          toast.error('FCS API error, using demo data');
+          return generateDemoWatchlistData();
+        }
+      }
+      
+      // Fallback to Alpha Vantage (original implementation with rate limiting)
+      console.log('Fetching watchlist data from Alpha Vantage...');
       const rates: ForexRate[] = [];
       let baseEURUSD = 0;
       
       // Fetch actual EUR/USD rate first as our baseline
-      const eurUsdResponse = await fetch(`${API_CONFIG.BASE_URL}?function=CURRENCY_EXCHANGE_RATE&from_currency=EUR&to_currency=USD&apikey=${API_CONFIG.API_KEY}`);
+      const eurUsdResponse = await fetch(`${API_CONFIG.ALPHA_VANTAGE_BASE_URL}?function=CURRENCY_EXCHANGE_RATE&from_currency=EUR&to_currency=USD&apikey=${API_CONFIG.ALPHA_VANTAGE_API_KEY}`);
       const eurUsdData = await eurUsdResponse.json();
       
       console.log('EUR/USD API response:', eurUsdData);
@@ -329,133 +397,40 @@ export const marketDataService = {
         throw new Error(eurUsdData['Error Message']);
       }
       
-      // Generate or fetch remaining pairs
+      // Generate remaining pairs using base rate (to avoid additional API calls)
       for (const pair of CURRENCY_PAIRS) {
         if (pair === 'EUR/USD') continue; // Already handled
         
-        // Try to fetch the real data for this pair
-        try {
-          const [baseCurrency, quoteCurrency] = pair.split('/');
-          const response = await fetch(
-            `${API_CONFIG.BASE_URL}?function=CURRENCY_EXCHANGE_RATE&from_currency=${baseCurrency}&to_currency=${quoteCurrency}&apikey=${API_CONFIG.API_KEY}`
-          );
-          const data = await response.json();
-          
-          // Check for rate limit message
-          if (checkForRateLimit(data)) {
-            // Use fallback calculation
-            let bid = 0;
-            let ask = 0;
-            
-            if (pair === 'GBP/USD') {
-              bid = baseEURUSD * 1.17;
-              ask = bid + 0.0003;
-            } else if (pair === 'USD/JPY') {
-              bid = baseEURUSD * 148;
-              ask = bid + 0.02;
-            } else if (pair === 'AUD/USD') {
-              bid = baseEURUSD * 0.6;
-              ask = bid + 0.0002;
-            } else if (pair === 'EUR/GBP') {
-              bid = baseEURUSD * 0.85;
-              ask = bid + 0.0002;
-            } else if (pair === 'EUR/CHF') {
-              bid = baseEURUSD * 0.95;
-              ask = bid + 0.0003;
-            } else if (pair === 'GBP/JPY') {
-              bid = baseEURUSD * 1.17 * 148;
-              ask = bid + 0.03;
-            }
-            
-            rates.push({
-              pair,
-              bid: bid.toFixed(pair.includes('JPY') ? 2 : 4),
-              ask: ask.toFixed(pair.includes('JPY') ? 2 : 4),
-              change: ((Math.random() * 0.2 - 0.1)).toFixed(2) + '%',
-              changeDirection: Math.random() > 0.5 ? 'up' : 'down'
-            });
-            continue;
-          }
-          
-          if (data['Realtime Currency Exchange Rate']) {
-            const rate = parseFloat(data['Realtime Currency Exchange Rate']['5. Exchange Rate']);
-            const bid = rate;
-            const ask = pair.includes('JPY') ? bid + 0.02 : bid + 0.0003; // Appropriate spread based on pair
-            
-            rates.push({
-              pair,
-              bid: bid.toFixed(pair.includes('JPY') ? 2 : 4),
-              ask: ask.toFixed(pair.includes('JPY') ? 2 : 4),
-              change: ((Math.random() * 0.2 - 0.1)).toFixed(2) + '%',
-              changeDirection: Math.random() > 0.5 ? 'up' : 'down'
-            });
-          } else {
-            // Fallback to simulated data
-            let bid = 0;
-            let ask = 0;
-            
-            if (pair === 'GBP/USD') {
-              bid = baseEURUSD * 1.17;
-              ask = bid + 0.0003;
-            } else if (pair === 'USD/JPY') {
-              bid = baseEURUSD * 148;
-              ask = bid + 0.02;
-            } else if (pair === 'AUD/USD') {
-              bid = baseEURUSD * 0.6;
-              ask = bid + 0.0002;
-            } else if (pair === 'EUR/GBP') {
-              bid = baseEURUSD * 0.85;
-              ask = bid + 0.0002;
-            } else if (pair === 'EUR/CHF') {
-              bid = baseEURUSD * 0.95;
-              ask = bid + 0.0003;
-            } else if (pair === 'GBP/JPY') {
-              bid = baseEURUSD * 1.17 * 148;
-              ask = bid + 0.03;
-            }
-            
-            rates.push({
-              pair,
-              bid: bid.toFixed(pair.includes('JPY') ? 2 : 4),
-              ask: ask.toFixed(pair.includes('JPY') ? 2 : 4),
-              change: ((Math.random() * 0.2 - 0.1)).toFixed(2) + '%',
-              changeDirection: Math.random() > 0.5 ? 'up' : 'down'
-            });
-          }
-        } catch (pairError) {
-          console.error(`Error fetching data for ${pair}, using fallback`, pairError);
-          // Use fallback calculation if fetch fails
-          let bid = 0;
-          let ask = 0;
-          
-          if (pair === 'GBP/USD') {
-            bid = baseEURUSD * 1.17;
-            ask = bid + 0.0003;
-          } else if (pair === 'USD/JPY') {
-            bid = baseEURUSD * 148;
-            ask = bid + 0.02;
-          } else if (pair === 'AUD/USD') {
-            bid = baseEURUSD * 0.6;
-            ask = bid + 0.0002;
-          } else if (pair === 'EUR/GBP') {
-            bid = baseEURUSD * 0.85;
-            ask = bid + 0.0002;
-          } else if (pair === 'EUR/CHF') {
-            bid = baseEURUSD * 0.95;
-            ask = bid + 0.0003;
-          } else if (pair === 'GBP/JPY') {
-            bid = baseEURUSD * 1.17 * 148;
-            ask = bid + 0.03;
-          }
-          
-          rates.push({
-            pair,
-            bid: bid.toFixed(pair.includes('JPY') ? 2 : 4),
-            ask: ask.toFixed(pair.includes('JPY') ? 2 : 4),
-            change: ((Math.random() * 0.2 - 0.1)).toFixed(2) + '%',
-            changeDirection: Math.random() > 0.5 ? 'up' : 'down'
-          });
+        let bid = 0;
+        let ask = 0;
+        
+        if (pair === 'GBP/USD') {
+          bid = baseEURUSD * 1.17;
+          ask = bid + 0.0003;
+        } else if (pair === 'USD/JPY') {
+          bid = baseEURUSD * 148;
+          ask = bid + 0.02;
+        } else if (pair === 'AUD/USD') {
+          bid = baseEURUSD * 0.6;
+          ask = bid + 0.0002;
+        } else if (pair === 'EUR/GBP') {
+          bid = baseEURUSD * 0.85;
+          ask = bid + 0.0002;
+        } else if (pair === 'EUR/CHF') {
+          bid = baseEURUSD * 0.95;
+          ask = bid + 0.0003;
+        } else if (pair === 'GBP/JPY') {
+          bid = baseEURUSD * 1.17 * 148;
+          ask = bid + 0.03;
         }
+        
+        rates.push({
+          pair,
+          bid: bid.toFixed(pair.includes('JPY') ? 2 : 4),
+          ask: ask.toFixed(pair.includes('JPY') ? 2 : 4),
+          change: ((Math.random() * 0.2 - 0.1)).toFixed(2) + '%',
+          changeDirection: Math.random() > 0.5 ? 'up' : 'down'
+        });
       }
       
       return rates;
@@ -485,36 +460,76 @@ export const marketDataService = {
       console.log('Fetching live market data for trade signals...');
       const allSignals: TradeSignal[] = [];
       
-      // Fetch real data for major pairs and analyze
-      for (const pair of CURRENCY_PAIRS.slice(0, 3)) { // Limit to 3 pairs to avoid rate limits
+      // Use FCS API if available, otherwise fallback to Alpha Vantage
+      if (dataProvider === 'fcs' && API_CONFIG.FCS_API_KEY !== 'YOUR_FCS_API_KEY') {
         try {
-          const [baseCurrency, quoteCurrency] = pair.split('/');
-          const response = await fetch(`${API_CONFIG.BASE_URL}?function=FX_DAILY&from_symbol=${baseCurrency}&to_symbol=${quoteCurrency}&apikey=${API_CONFIG.API_KEY}`);
-          const data = await response.json();
-          
-          if (data['Error Message']) {
-            throw new Error(data['Error Message']);
+          // Fetch historical data for signal analysis from FCS
+          for (const pair of CURRENCY_PAIRS.slice(0, 3)) { // Limit to 3 pairs
+            const [base, quote] = pair.split('/');
+            const historicalData = await fetchFromFCS('forex/history', {
+              symbol: `${base}${quote}`,
+              period: '1D',
+              limit: '30'
+            });
+            
+            if (historicalData.status && historicalData.response) {
+              // Convert FCS format to our expected format
+              const timeSeriesData: any = {};
+              historicalData.response.forEach((item: any, index: number) => {
+                const date = new Date(item.tm * 1000).toISOString().split('T')[0];
+                timeSeriesData[date] = {
+                  '1. open': item.o.toString(),
+                  '2. high': item.h.toString(),
+                  '3. low': item.l.toString(),
+                  '4. close': item.c.toString()
+                };
+              });
+              
+              const pairSignals = analyzeMarketData(timeSeriesData, pair);
+              allSignals.push(...pairSignals);
+              console.log(`Generated ${pairSignals.length} signals for ${pair} based on FCS data`);
+            }
+            
+            // Small delay between requests
+            await new Promise(resolve => setTimeout(resolve, 200));
           }
-          
-          // If we've hit API limits, use demo data
-          if (checkForRateLimit(data)) {
-            console.warn('API limit reached while fetching trade signals, using demo data');
-            return generateDemoTradeSignals();
+        } catch (fcsError) {
+          console.error('FCS API error for signals:', fcsError);
+          toast.error('FCS API error, using demo signals');
+          return generateDemoTradeSignals();
+        }
+      } else {
+        // Fallback to Alpha Vantage with rate limiting
+        for (const pair of CURRENCY_PAIRS.slice(0, 3)) { // Limit to 3 pairs to avoid rate limits
+          try {
+            const [baseCurrency, quoteCurrency] = pair.split('/');
+            const response = await fetch(`${API_CONFIG.ALPHA_VANTAGE_BASE_URL}?function=FX_DAILY&from_symbol=${baseCurrency}&to_symbol=${quoteCurrency}&apikey=${API_CONFIG.ALPHA_VANTAGE_API_KEY}`);
+            const data = await response.json();
+            
+            if (data['Error Message']) {
+              throw new Error(data['Error Message']);
+            }
+            
+            // If we've hit API limits, use demo data
+            if (checkForRateLimit(data)) {
+              console.warn('API limit reached while fetching trade signals, using demo data');
+              return generateDemoTradeSignals();
+            }
+            
+            // Get the time series data if available
+            const timeSeriesData = data['Time Series FX (Daily)'];
+            if (timeSeriesData) {
+              const pairSignals = analyzeMarketData(timeSeriesData, pair);
+              allSignals.push(...pairSignals);
+              console.log(`Generated ${pairSignals.length} signals for ${pair} based on live data`);
+            }
+            
+            // Add delay between requests to avoid hitting rate limits
+            await new Promise(resolve => setTimeout(resolve, 500));
+          } catch (pairError) {
+            console.error(`Error fetching data for ${pair}:`, pairError);
+            // Continue with other pairs
           }
-          
-          // Get the time series data if available
-          const timeSeriesData = data['Time Series FX (Daily)'];
-          if (timeSeriesData) {
-            const pairSignals = analyzeMarketData(timeSeriesData, pair);
-            allSignals.push(...pairSignals);
-            console.log(`Generated ${pairSignals.length} signals for ${pair} based on live data`);
-          }
-          
-          // Add small delay between requests to avoid hitting rate limits
-          await new Promise(resolve => setTimeout(resolve, 500));
-        } catch (pairError) {
-          console.error(`Error fetching data for ${pair}:`, pairError);
-          // Continue with other pairs
         }
       }
       
@@ -551,7 +566,7 @@ export const marketDataService = {
       }
       
       // Fetch real daily forex data
-      const response = await fetch(`${API_CONFIG.BASE_URL}?function=FX_DAILY&from_symbol=EUR&to_symbol=USD&apikey=${API_CONFIG.API_KEY}`);
+      const response = await fetch(`${API_CONFIG.ALPHA_VANTAGE_BASE_URL}?function=FX_DAILY&from_symbol=EUR&to_symbol=USD&apikey=${API_CONFIG.ALPHA_VANTAGE_API_KEY}`);
       const data = await response.json();
       
       if (data['Error Message']) {
@@ -674,7 +689,19 @@ export const marketDataService = {
   
   // Get API key for settings
   getApiKey: (): string => {
-    return API_CONFIG.API_KEY;
+    return API_CONFIG.ALPHA_VANTAGE_API_KEY;
+  },
+  
+  // Get FCS API key for settings
+  getFCSApiKey: (): string => {
+    return API_CONFIG.FCS_API_KEY;
+  },
+  
+  // Set FCS API key
+  setFCSApiKey: (apiKey: string): void => {
+    API_CONFIG.FCS_API_KEY = apiKey;
+    localStorage.setItem('fcs_api_key', apiKey);
+    toast.success('FCS API key updated');
   }
 };
 
