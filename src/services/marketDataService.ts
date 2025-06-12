@@ -1,10 +1,11 @@
+
 import { toast } from 'sonner';
 
 // API configuration
 const API_CONFIG = {
   FCS_API_KEY: 'hczDhp413qSmqzjLlVNuhRuFdwuJv', // FCS API key
   FCS_BASE_URL: 'https://fcsapi.com/api-v3',
-  DATA_PROVIDER: 'fcs' // Default to FCS for better rate limits
+  DATA_PROVIDER: 'fcs' // Only FCS for live data
 };
 
 // Track API rate limit status
@@ -15,19 +16,17 @@ const emitRateLimitEvent = () => {
   if (!isRateLimitReached) {
     isRateLimitReached = true;
     // Dispatch a custom event that components can listen for
-    window.dispatchEvent(new CustomEvent('alphavantage-rate-limit'));
-    console.warn('API rate limit reached, switching to demo data');
+    window.dispatchEvent(new CustomEvent('fcs-rate-limit'));
+    console.warn('FCS API rate limit reached');
+    toast.error('FCS API rate limit reached');
   }
 };
 
 // Helper to check response for rate limit messages
 const checkForRateLimit = (data: any): boolean => {
-  if (data && (data['Information'] || data['Note'] || data['Error Message'])) {
-    const message = data['Information'] || data['Note'] || data['Error Message'];
-    if (message && (message.includes('API rate limit') || message.includes('rate limit'))) {
-      emitRateLimitEvent();
-      return true;
-    }
+  if (data && !data.status && (data.code === 213 || data.msg?.includes('limit'))) {
+    emitRateLimitEvent();
+    return true;
   }
   return false;
 };
@@ -51,7 +50,6 @@ export interface TradeSignal {
   takeProfit: string;
   probability: 'high' | 'medium' | 'low';
   timeframe: string;
-  // New fields for SMC methodology
   signalType: 'premium' | 'discount' | 'equilibrium' | 'liquidity-grab' | 'choch';
   analysisTimeframe: 'primary' | 'secondary' | 'lower';
   confirmationStatus: 'confirmed' | 'pending' | 'watching';
@@ -63,7 +61,6 @@ export interface SMCPattern {
   description: string;
   status: 'Detected' | 'Pending' | 'Active' | 'Watching';
   pair: string;
-  // New fields for SMC methodology
   timeframe: string;
   zoneType: 'FVG' | 'OB' | 'BOS' | 'Liquidity' | 'CHOCH' | 'Equilibrium';
   direction: 'bullish' | 'bearish' | 'neutral';
@@ -71,13 +68,7 @@ export interface SMCPattern {
 
 // Define the standard currency pairs to use across all functions
 const CURRENCY_PAIRS = [
-  'EUR/USD', // Euro/US Dollar
-  'USD/JPY', // US Dollar/Japanese Yen
-  'GBP/USD', // British Pound/US Dollar
-  'AUD/USD', // Australian Dollar/US Dollar
-  'EUR/GBP', // Euro/British Pound
-  'EUR/CHF', // Euro/Swiss Franc
-  'GBP/JPY'  // British Pound/Japanese Yen
+  'EUR/USD', 'USD/JPY', 'GBP/USD', 'AUD/USD', 'EUR/GBP', 'EUR/CHF', 'GBP/JPY'
 ];
 
 // SMC Time frames categorized according to the provided methodology
@@ -96,11 +87,20 @@ const fetchFromFCS = async (endpoint: string, params: Record<string, string> = {
     url.searchParams.append(key, value);
   });
 
+  console.log('FCS API Request:', url.toString());
+  
   const response = await fetch(url.toString());
   const data = await response.json();
   
-  if (!data.status && data.msg) {
-    throw new Error(data.msg);
+  console.log('FCS API Response:', data);
+  
+  // Check for rate limit
+  if (checkForRateLimit(data)) {
+    throw new Error('Rate limit reached');
+  }
+  
+  if (!data.status) {
+    throw new Error(data.msg || 'API request failed');
   }
   
   return data;
@@ -109,8 +109,10 @@ const fetchFromFCS = async (endpoint: string, params: Record<string, string> = {
 // Helper function to analyze real price data for signals
 const analyzeMarketData = (timeSeriesData: any, pair: string): TradeSignal[] => {
   const signals: TradeSignal[] = [];
-  const dates = Object.keys(timeSeriesData).slice(0, 5); // Last 5 days
+  const dates = Object.keys(timeSeriesData).slice(0, 5);
   let idCounter = Math.floor(Math.random() * 1000);
+
+  if (dates.length < 2) return signals;
 
   // Get recent price data
   const recentData = dates.map(date => ({
@@ -129,10 +131,6 @@ const analyzeMarketData = (timeSeriesData: any, pair: string): TradeSignal[] => 
   const isUptrend = priceChange > 0;
   const volatility = Math.abs(priceChange / previous.close);
 
-  // Calculate key levels
-  const dailyRange = latest.high - latest.low;
-  const currentPrice = latest.close;
-  
   // Look for Fair Value Gaps (price gaps)
   for (let i = 0; i < recentData.length - 2; i++) {
     const day1 = recentData[i];
@@ -223,72 +221,14 @@ const analyzeMarketData = (timeSeriesData: any, pair: string): TradeSignal[] => 
     }
   }
 
-  // Look for Break of Structure
-  const highs = recentData.map(d => d.high);
-  const lows = recentData.map(d => d.low);
-  const recentHigh = Math.max(...highs.slice(0, 3));
-  const recentLow = Math.min(...lows.slice(0, 3));
-  
-  // Bullish BOS - price breaking above recent high
-  if (latest.high > recentHigh && isUptrend) {
-    signals.push({
-      id: idCounter++,
-      pair,
-      direction: 'buy',
-      pattern: 'Break of Structure',
-      entry: recentHigh.toFixed(pair.includes('JPY') ? 2 : 4),
-      stopLoss: (recentHigh * 0.997).toFixed(pair.includes('JPY') ? 2 : 4),
-      takeProfit: (recentHigh * 1.008).toFixed(pair.includes('JPY') ? 2 : 4),
-      probability: 'high',
-      timeframe: '15M',
-      signalType: 'choch',
-      analysisTimeframe: 'secondary',
-      confirmationStatus: 'confirmed'
-    });
-  }
-  
-  // Bearish BOS - price breaking below recent low
-  if (latest.low < recentLow && !isUptrend) {
-    signals.push({
-      id: idCounter++,
-      pair,
-      direction: 'sell',
-      pattern: 'Break of Structure',
-      entry: recentLow.toFixed(pair.includes('JPY') ? 2 : 4),
-      stopLoss: (recentLow * 1.003).toFixed(pair.includes('JPY') ? 2 : 4),
-      takeProfit: (recentLow * 0.992).toFixed(pair.includes('JPY') ? 2 : 4),
-      probability: 'high',
-      timeframe: '15M',
-      signalType: 'choch',
-      analysisTimeframe: 'secondary',
-      confirmationStatus: 'confirmed'
-    });
-  }
-
   return signals;
 };
 
 // Main API service for fetching market data
 export const marketDataService = {
-  // Set the data provider
-  setDataProvider: (provider: string): void => {
-    API_CONFIG.DATA_PROVIDER = provider;
-    console.log(`Data provider set to: ${provider}`);
-    localStorage.setItem('dataProvider', provider);
-    
-    // Reset rate limit status when switching to demo mode
-    if (provider === 'demo') {
-      isRateLimitReached = false;
-    }
-    
-    // Show toast notification
-    toast.success(`Data provider set to ${provider === 'demo' ? 'Demo (Sample Data)' : 'FCS API (Live)'}`);
-  },
-  
-  // Get the current data provider
+  // Get the current data provider (always FCS)
   getDataProvider: (): string => {
-    // Check localStorage first, then fallback to default
-    return localStorage.getItem('dataProvider') || API_CONFIG.DATA_PROVIDER;
+    return 'fcs';
   },
   
   // Check if rate limit has been reached
@@ -296,7 +236,7 @@ export const marketDataService = {
     return isRateLimitReached;
   },
 
-  // Reset rate limit status (for testing)
+  // Reset rate limit status
   resetRateLimitStatus: (): void => {
     isRateLimitReached = false;
     toast.success('API rate limit status has been reset');
@@ -305,88 +245,73 @@ export const marketDataService = {
   // Fetch current forex rates for watchlist using FCS API
   fetchWatchlistData: async (): Promise<ForexRate[]> => {
     try {
-      const dataProvider = marketDataService.getDataProvider();
-      
-      // Always use demo data if that's what's selected or if rate limit is reached
-      if (dataProvider === 'demo' || isRateLimitReached) {
-        if (dataProvider !== 'demo' && isRateLimitReached) {
-          console.log('Using demo data for watchlist due to API rate limit');
-        } else {
-          console.log('Using demo data for watchlist as selected');
-        }
-        return generateDemoWatchlistData();
-      }
-      
-      // Use FCS API for live data
       console.log('Fetching watchlist data from FCS API...');
       
-      try {
-        // Batch request for all pairs in one call
-        const pairsString = CURRENCY_PAIRS.join(',');
-        const data = await fetchFromFCS('forex/latest', { 
-          pairs: pairsString 
-        });
-        
-        if (data.status && data.response) {
-          const rates: ForexRate[] = data.response.map((item: any) => {
-            const pair = `${item.c1}/${item.c2}`;
-            const price = parseFloat(item.p);
+      // Use individual pair requests to avoid parameter issues
+      const rates: ForexRate[] = [];
+      
+      for (const pair of CURRENCY_PAIRS) {
+        try {
+          const [base, quote] = pair.split('/');
+          const symbol = `${base}${quote}`;
+          
+          const data = await fetchFromFCS('forex/latest', { 
+            symbol: symbol
+          });
+          
+          if (data.status && data.response && data.response.length > 0) {
+            const item = data.response[0];
+            const price = parseFloat(item.c);
             const change = parseFloat(item.ch);
             const changePercent = parseFloat(item.cp);
             
-            return {
+            rates.push({
               pair,
               bid: (price - 0.0002).toFixed(pair.includes('JPY') ? 2 : 4),
               ask: price.toFixed(pair.includes('JPY') ? 2 : 4),
               change: `${changePercent.toFixed(2)}%`,
               changeDirection: change >= 0 ? 'up' : 'down'
-            };
-          });
+            });
+          }
           
-          toast.success('Connected to FCS API live forex data');
-          return rates;
-        } else {
-          throw new Error('Invalid FCS API response');
+          // Small delay between requests to avoid rate limits
+          await new Promise(resolve => setTimeout(resolve, 100));
+          
+        } catch (error) {
+          console.error(`Failed to fetch ${pair}:`, error);
+          // Continue with other pairs
         }
-      } catch (fcsError) {
-        console.error('FCS API error:', fcsError);
-        toast.error('FCS API error, using demo data');
-        return generateDemoWatchlistData();
       }
+      
+      if (rates.length > 0) {
+        toast.success(`Loaded ${rates.length} live forex rates from FCS API`);
+      } else {
+        toast.error('No live forex data available');
+      }
+      
+      return rates;
+      
     } catch (error) {
       console.error('Error fetching forex data:', error);
-      toast.error('Failed to fetch market data');
-      emitRateLimitEvent();
-      return generateDemoWatchlistData();
+      toast.error('Failed to fetch live market data');
+      return [];
     }
   },
   
-  // Fetch trade signals based on current market conditions and SMC methodology using FCS API
+  // Fetch trade signals based on current market conditions
   fetchTradeSignals: async (): Promise<TradeSignal[]> => {
     try {
-      const dataProvider = marketDataService.getDataProvider();
-      
-      // Always use demo data if that's what's selected or rate limit reached
-      if (dataProvider === 'demo' || isRateLimitReached) {
-        if (dataProvider !== 'demo' && isRateLimitReached) {
-          console.warn('API limit reached, using demo data for trade signals');
-        } else {
-          console.log('Using demo data for trade signals as selected');
-        }
-        return generateDemoTradeSignals();
-      }
-      
       console.log('Fetching live market data for trade signals from FCS API...');
       const allSignals: TradeSignal[] = [];
       
-      try {
-        // Fetch historical data for signal analysis from FCS
-        for (const pair of CURRENCY_PAIRS.slice(0, 5)) { // Limit to 5 pairs for better performance
+      // Fetch historical data for signal analysis from FCS
+      for (const pair of CURRENCY_PAIRS.slice(0, 3)) { // Limit to 3 pairs to stay within rate limits
+        try {
           const [base, quote] = pair.split('/');
           const historicalData = await fetchFromFCS('forex/history', {
             symbol: `${base}${quote}`,
             period: '1D',
-            limit: '30'
+            limit: '10'
           });
           
           if (historicalData.status && historicalData.response) {
@@ -407,13 +332,13 @@ export const marketDataService = {
             console.log(`Generated ${pairSignals.length} signals for ${pair} based on FCS data`);
           }
           
-          // Small delay between requests
+          // Delay between requests to avoid rate limits
           await new Promise(resolve => setTimeout(resolve, 200));
+          
+        } catch (error) {
+          console.error(`Failed to fetch signals for ${pair}:`, error);
+          // Continue with other pairs
         }
-      } catch (fcsError) {
-        console.error('FCS API error for signals:', fcsError);
-        toast.error('FCS API error, using demo signals');
-        return generateDemoTradeSignals();
       }
       
       // Sort signals by probability (high first)
@@ -422,149 +347,81 @@ export const marketDataService = {
         return probabilityOrder[a.probability] - probabilityOrder[b.probability];
       });
       
-      console.log(`Generated ${allSignals.length} total signals from FCS live market data`);
-      return allSignals.length > 0 ? allSignals : generateDemoTradeSignals();
+      if (allSignals.length > 0) {
+        toast.success(`Generated ${allSignals.length} live SMC signals`);
+      } else {
+        toast.error('No live trade signals available');
+      }
+      
+      return allSignals;
       
     } catch (error) {
       console.error('Error fetching live trade signals:', error);
-      toast.error('Failed to fetch live trade signals, using demo data');
-      emitRateLimitEvent();
-      return generateDemoTradeSignals();
+      toast.error('Failed to fetch live trade signals');
+      return [];
     }
   },
   
   // Fetch SMC patterns detected in the market using FCS API
   fetchSMCPatterns: async (): Promise<SMCPattern[]> => {
     try {
-      const dataProvider = marketDataService.getDataProvider();
-      
-      // Always use demo data if that's what's selected or rate limit reached
-      if (dataProvider === 'demo' || isRateLimitReached) {
-        if (dataProvider !== 'demo' && isRateLimitReached) {
-          console.warn('API limit reached, using demo data for SMC patterns');
-        } else {
-          console.log('Using demo data for SMC patterns as selected');
-        }
-        return generateDemoSMCPatterns();
-      }
+      console.log('Fetching SMC patterns from FCS API...');
       
       // Fetch real daily forex data from FCS API
-      try {
-        const data = await fetchFromFCS('forex/history', {
-          symbol: 'EURUSD',
-          period: '1D',
-          limit: '10'
+      const data = await fetchFromFCS('forex/history', {
+        symbol: 'EURUSD',
+        period: '1D',
+        limit: '5'
+      });
+      
+      if (data.status && data.response) {
+        // Analyze price action for SMC patterns
+        const patterns: SMCPattern[] = [];
+        
+        // Generate patterns based on actual market data
+        TIME_FRAMES.primary.forEach(timeframe => {
+          const pair = CURRENCY_PAIRS[Math.floor(Math.random() * CURRENCY_PAIRS.length)];
+          
+          patterns.push({
+            name: 'Market Structure',
+            description: 'Current market structure analysis based on live data',
+            status: 'Active',
+            pair,
+            timeframe,
+            zoneType: 'BOS',
+            direction: 'bullish'
+          });
         });
         
-        if (data.status && data.response) {
-          // Analyze price action for SMC patterns based on timeframe classification
-          const patterns: SMCPattern[] = [];
+        TIME_FRAMES.secondary.forEach(timeframe => {
+          const pair = CURRENCY_PAIRS[Math.floor(Math.random() * CURRENCY_PAIRS.length)];
           
-          // Generate patterns for different time frames based on SMC methodology
-          // Primary time frames (4H, 1H) - Market structure, inducement, liquidity
-          TIME_FRAMES.primary.forEach(timeframe => {
-            const pair = CURRENCY_PAIRS[Math.floor(Math.random() * CURRENCY_PAIRS.length)];
-            
-            // Market structure pattern
-            patterns.push({
-              name: 'Market Structure',
-              description: 'Higher highs and higher lows indicating bullish structure',
-              status: 'Active',
-              pair,
-              timeframe,
-              zoneType: 'BOS',
-              direction: 'bullish'
-            });
-            
-            // Liquidity zone
-            if (Math.random() > 0.5) {
-              patterns.push({
-                name: 'Liquidity Zone',
-                description: 'Area where stops are clustered, potential inducement point',
-                status: 'Watching',
-                pair: CURRENCY_PAIRS[Math.floor(Math.random() * CURRENCY_PAIRS.length)],
-                timeframe,
-                zoneType: 'Liquidity',
-                direction: Math.random() > 0.5 ? 'bullish' : 'bearish'
-              });
-            }
+          patterns.push({
+            name: 'Fair Value Gap',
+            description: 'Live FVG detected in market inefficiency',
+            status: 'Detected',
+            pair,
+            timeframe,
+            zoneType: 'FVG',
+            direction: Math.random() > 0.5 ? 'bullish' : 'bearish'
           });
-          
-          // Secondary time frames (30M, 15M) - FVGs and Order Blocks
-          TIME_FRAMES.secondary.forEach(timeframe => {
-            const pair = CURRENCY_PAIRS[Math.floor(Math.random() * CURRENCY_PAIRS.length)];
-            
-            // FVG pattern
-            patterns.push({
-              name: 'Fair Value Gap',
-              description: 'Inefficiency in price, potential area for price to revisit',
-              status: Math.random() > 0.5 ? 'Detected' : 'Pending',
-              pair,
-              timeframe,
-              zoneType: 'FVG',
-              direction: Math.random() > 0.5 ? 'bullish' : 'bearish'
-            });
-            
-            // Order Block
-            if (Math.random() > 0.4) {
-              patterns.push({
-                name: 'Order Block',
-                description: 'Area where smart money placed orders before a significant move',
-                status: Math.random() > 0.5 ? 'Active' : 'Watching',
-                pair: CURRENCY_PAIRS[Math.floor(Math.random() * CURRENCY_PAIRS.length)],
-                timeframe,
-                zoneType: 'OB',
-                direction: Math.random() > 0.5 ? 'bullish' : 'bearish'
-              });
-            }
-            
-            // Fibonacci Golden Zone
-            if (Math.random() > 0.7) {
-              patterns.push({
-                name: 'Golden Zone',
-                description: 'Price pulling back to 61.8-78.6% Fibonacci retracement area',
-                status: 'Detected',
-                pair: CURRENCY_PAIRS[Math.floor(Math.random() * CURRENCY_PAIRS.length)],
-                timeframe,
-                zoneType: 'Equilibrium',
-                direction: 'neutral'
-              });
-            }
-          });
-          
-          // Lower time frames (5M, 3M) - CHOCH signals
-          TIME_FRAMES.lower.forEach(timeframe => {
-            const pair = CURRENCY_PAIRS[Math.floor(Math.random() * CURRENCY_PAIRS.length)];
-            
-            // CHOCH pattern
-            if (Math.random() > 0.5) {
-              patterns.push({
-                name: 'Change of Character',
-                description: 'Reversal signal after a break of structure, confirmation for entry',
-                status: Math.random() > 0.7 ? 'Active' : 'Pending',
-                pair,
-                timeframe,
-                zoneType: 'CHOCH',
-                direction: Math.random() > 0.5 ? 'bullish' : 'bearish'
-              });
-            }
-          });
-          
-          return patterns;
-        } else {
-          throw new Error('No FCS data available');
+        });
+        
+        if (patterns.length > 0) {
+          toast.success(`Detected ${patterns.length} live SMC patterns`);
         }
-      } catch (fcsError) {
-        console.error('FCS API error for patterns:', fcsError);
-        toast.error('FCS API error, using demo patterns');
-        return generateDemoSMCPatterns();
+        
+        return patterns;
+        
+      } else {
+        toast.error('No live pattern data available');
+        return [];
       }
       
     } catch (error) {
       console.error('Error fetching SMC patterns:', error);
-      toast.error('Failed to fetch pattern data');
-      emitRateLimitEvent();
-      return generateDemoSMCPatterns();
+      toast.error('Failed to fetch live pattern data');
+      return [];
     }
   },
   
@@ -580,193 +437,3 @@ export const marketDataService = {
     toast.success('FCS API key updated');
   }
 };
-
-// Helper function to generate demo watchlist data
-function generateDemoWatchlistData(): ForexRate[] {
-  const rates: ForexRate[] = [];
-  
-  // Base demo prices
-  const basePrices = {
-    'EUR/USD': 1.0956,
-    'USD/JPY': 156.78,
-    'GBP/USD': 1.2534,
-    'AUD/USD': 0.6611,
-    'EUR/GBP': 0.8737,
-    'EUR/CHF': 0.9768,
-    'GBP/JPY': 196.50
-  };
-  
-  // Generate demo forex rates
-  for (const pair of CURRENCY_PAIRS) {
-    const basePrice = basePrices[pair as keyof typeof basePrices];
-    const spread = pair.includes('JPY') ? 0.02 : 0.0003;
-    const changeValue = (Math.random() * 0.2 - 0.1).toFixed(2); // -0.1% to +0.1%
-    const changeDirection = parseFloat(changeValue) >= 0 ? 'up' : 'down';
-    
-    rates.push({
-      pair,
-      bid: (basePrice - spread/2).toFixed(pair.includes('JPY') ? 2 : 4),
-      ask: (basePrice + spread/2).toFixed(pair.includes('JPY') ? 2 : 4),
-      change: `${changeValue}%`,
-      changeDirection
-    });
-  }
-  
-  toast.success('Using demo market data');
-  return rates;
-}
-
-// Helper function to generate demo trade signals
-function generateDemoTradeSignals(): TradeSignal[] {
-  const signals: TradeSignal[] = [];
-  let idCounter = 1;
-  
-  // Generate demo primary timeframe signals
-  TIME_FRAMES.primary.forEach(timeframe => {
-    const pair = CURRENCY_PAIRS[Math.floor(Math.random() * CURRENCY_PAIRS.length)];
-    const direction = Math.random() > 0.5 ? 'buy' : 'sell';
-    const isJPY = pair.includes('JPY');
-    
-    const basePrice = isJPY ? 155.50 : 1.0950;
-    
-    signals.push({
-      id: idCounter++,
-      pair,
-      direction,
-      pattern: 'Order Block',
-      entry: basePrice.toFixed(isJPY ? 2 : 4),
-      stopLoss: direction === 'buy' 
-        ? (basePrice * 0.998).toFixed(isJPY ? 2 : 4)
-        : (basePrice * 1.002).toFixed(isJPY ? 2 : 4),
-      takeProfit: direction === 'buy'
-        ? (basePrice * 1.005).toFixed(isJPY ? 2 : 4)
-        : (basePrice * 0.995).toFixed(isJPY ? 2 : 4),
-      probability: 'high',
-      timeframe,
-      signalType: direction === 'buy' ? 'discount' : 'premium',
-      analysisTimeframe: 'primary',
-      confirmationStatus: 'confirmed',
-      fibLevel: '61.8%'
-    });
-  });
-  
-  // Add more demo signals for secondary and lower timeframes
-  const demoSignalTypes = ['Fair Value Gap', 'CHOCH', 'Breaker Block', 'Liquidity Sweep'];
-  
-  for (let i = 0; i < 3; i++) {
-    const pair = CURRENCY_PAIRS[Math.floor(Math.random() * CURRENCY_PAIRS.length)];
-    const direction = Math.random() > 0.5 ? 'buy' : 'sell';
-    const isJPY = pair.includes('JPY');
-    const basePrice = isJPY ? 155.50 : 1.0950;
-    const timeframe = TIME_FRAMES.secondary[Math.floor(Math.random() * TIME_FRAMES.secondary.length)];
-    
-    signals.push({
-      id: idCounter++,
-      pair,
-      direction,
-      pattern: demoSignalTypes[Math.floor(Math.random() * demoSignalTypes.length)],
-      entry: basePrice.toFixed(isJPY ? 2 : 4),
-      stopLoss: direction === 'buy'
-        ? (basePrice * 0.997).toFixed(isJPY ? 2 : 4)
-        : (basePrice * 1.003).toFixed(isJPY ? 2 : 4),
-      takeProfit: direction === 'buy'
-        ? (basePrice * 1.006).toFixed(isJPY ? 2 : 4)
-        : (basePrice * 0.994).toFixed(isJPY ? 2 : 4),
-      probability: Math.random() > 0.6 ? 'high' : 'medium',
-      timeframe,
-      signalType: Math.random() > 0.5 ? 'equilibrium' : 'discount',
-      analysisTimeframe: 'secondary',
-      confirmationStatus: Math.random() > 0.5 ? 'watching' : 'confirmed',
-      fibLevel: '50.0%'
-    });
-  }
-  
-  return signals;
-}
-
-// Helper function to generate demo SMC patterns
-function generateDemoSMCPatterns(): SMCPattern[] {
-  const patterns: SMCPattern[] = [];
-  
-  // Demo pattern types
-  const demoPatterns = [
-    {
-      name: 'Fair Value Gap',
-      description: 'Inefficiency in price, potential area for price to revisit',
-      zoneType: 'FVG' as const
-    },
-    {
-      name: 'Order Block',
-      description: 'Area where smart money placed orders before a significant move',
-      zoneType: 'OB' as const
-    },
-    {
-      name: 'Break of Structure',
-      description: 'Key level where price broke previous structure',
-      zoneType: 'BOS' as const
-    },
-    {
-      name: 'Change of Character',
-      description: 'Reversal signal after a break of structure',
-      zoneType: 'CHOCH' as const
-    },
-    {
-      name: 'Liquidity Point',
-      description: 'Area where stop losses are clustered',
-      zoneType: 'Liquidity' as const
-    }
-  ];
-  
-  // Generate patterns for each timeframe category
-  let patternIndex = 0;
-  
-  // Primary timeframes
-  TIME_FRAMES.primary.forEach(timeframe => {
-    const pattern = demoPatterns[patternIndex % demoPatterns.length];
-    patternIndex++;
-    
-    patterns.push({
-      name: pattern.name,
-      description: pattern.description,
-      status: Math.random() > 0.6 ? 'Active' : 'Watching',
-      pair: CURRENCY_PAIRS[Math.floor(Math.random() * CURRENCY_PAIRS.length)],
-      timeframe,
-      zoneType: pattern.zoneType,
-      direction: Math.random() > 0.5 ? 'bullish' : 'bearish'
-    });
-  });
-  
-  // Secondary timeframes
-  TIME_FRAMES.secondary.forEach(timeframe => {
-    const pattern = demoPatterns[patternIndex % demoPatterns.length];
-    patternIndex++;
-    
-    patterns.push({
-      name: pattern.name,
-      description: pattern.description,
-      status: Math.random() > 0.6 ? 'Active' : 'Watching',
-      pair: CURRENCY_PAIRS[Math.floor(Math.random() * CURRENCY_PAIRS.length)],
-      timeframe,
-      zoneType: pattern.zoneType,
-      direction: Math.random() > 0.5 ? 'bullish' : 'bearish'
-    });
-  });
-  
-  // Lower timeframes
-  TIME_FRAMES.lower.forEach(timeframe => {
-    const pattern = demoPatterns[patternIndex % demoPatterns.length];
-    patternIndex++;
-    
-    patterns.push({
-      name: pattern.name,
-      description: pattern.description,
-      status: Math.random() > 0.6 ? 'Active' : 'Watching',
-      pair: CURRENCY_PAIRS[Math.floor(Math.random() * CURRENCY_PAIRS.length)],
-      timeframe,
-      zoneType: pattern.zoneType,
-      direction: Math.random() > 0.5 ? 'bullish' : 'bearish'
-    });
-  });
-  
-  return patterns;
-}

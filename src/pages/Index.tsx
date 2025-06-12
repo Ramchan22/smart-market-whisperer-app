@@ -21,27 +21,25 @@ interface ChartDataPoint {
 }
 
 const Index = () => {
-  const [dataProvider, setDataProvider] = useState('demo');
   const [rateLimitReached, setRateLimitReached] = useState(false);
   const [chartData, setChartData] = useState<ChartDataPoint[]>([]);
   const [currentPair, setCurrentPair] = useState('GBPUSD');
   const [isChartLoading, setIsChartLoading] = useState(false);
   
-  // Check data provider on component mount and if it changes
+  // Check rate limit status on component mount
   useEffect(() => {
-    const provider = marketDataService.getDataProvider();
-    setDataProvider(provider);
+    setRateLimitReached(marketDataService.isRateLimitReached());
     
     // Set up an event listener for API rate limit reached
     const handleRateLimit = () => {
       setRateLimitReached(true);
     };
     
-    // Add event listener for custom rate limit event
-    window.addEventListener('alphavantage-rate-limit', handleRateLimit);
+    // Add event listener for FCS rate limit event
+    window.addEventListener('fcs-rate-limit', handleRateLimit);
     
     return () => {
-      window.removeEventListener('alphavantage-rate-limit', handleRateLimit);
+      window.removeEventListener('fcs-rate-limit', handleRateLimit);
     };
   }, []);
 
@@ -65,11 +63,11 @@ const Index = () => {
               <TooltipTrigger asChild>
                 <div className="flex items-center gap-2">
                   <Badge 
-                    variant={dataProvider === 'alphavantage' ? 'default' : 'outline'}
+                    variant="default"
                     className="gap-1 cursor-help bg-blue-500"
                   >
                     <Info className="h-3 w-3" />
-                    Live Data
+                    FCS API Live Data
                   </Badge>
                   
                   {rateLimitReached && (
@@ -80,15 +78,9 @@ const Index = () => {
                 </div>
               </TooltipTrigger>
               <TooltipContent>
-                {dataProvider === 'alphavantage' ? (
-                  <>
-                    {rateLimitReached 
-                      ? 'Alpha Vantage API limit reached. Some data is being simulated.' 
-                      : 'Using Alpha Vantage live market data.'}
-                  </>
-                ) : (
-                  'Using demo data. Switch to live data in Settings.'
-                )}
+                {rateLimitReached 
+                  ? 'FCS API rate limit reached. Live data temporarily unavailable.' 
+                  : 'Using FCS API for live forex market data and analysis.'}
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
@@ -103,7 +95,7 @@ const Index = () => {
               chartData={chartData}
               currentPair={currentPair}
               isLoading={isChartLoading}
-              dataProvider={dataProvider}
+              dataProvider="fcs"
             />
           </div>
         </div>
