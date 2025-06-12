@@ -218,8 +218,7 @@ const Settings = () => {
                       <SelectValue placeholder="Select provider" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="fcs">FCS API (Recommended - Better Rate Limits)</SelectItem>
-                      <SelectItem value="alphavantage">Alpha Vantage (5 requests/min limit)</SelectItem>
+                      <SelectItem value="fcs">FCS API (Live Data - 500 requests/month)</SelectItem>
                       <SelectItem value="demo">Demo (Sample Data)</SelectItem>
                     </SelectContent>
                   </Select>
@@ -243,16 +242,6 @@ const Settings = () => {
                     </p>
                   </div>
                 )}
-
-                {dataProvider === 'alphavantage' && (
-                  <div className="space-y-2">
-                    <Label htmlFor="alpha-api-key">Alpha Vantage API Key</Label>
-                    <Input id="alpha-api-key" type="password" value={marketDataService.getApiKey()} readOnly placeholder="Enter your API key" />
-                    <p className="text-xs text-muted-foreground">
-                      Note: Alpha Vantage has a 5 requests/minute limit on free tier
-                    </p>
-                  </div>
-                )}
                 
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
@@ -268,7 +257,7 @@ const Settings = () => {
                   </div>
                   <p className="text-xs text-muted-foreground">
                     {realTimeData 
-                      ? `Live trading data is enabled with ${dataProvider === 'fcs' ? 'FCS API' : 'Alpha Vantage API'}` 
+                      ? "Live trading data is enabled with FCS API" 
                       : "Using demo data mode (no API calls)"}
                   </p>
                 </div>
@@ -278,7 +267,7 @@ const Settings = () => {
                     <p className="text-sm text-blue-800">
                       <strong>Rate Limit Info:</strong><br/>
                       • FCS API: Up to 500 requests/month (free tier)<br/>
-                      • Alpha Vantage: 5 requests/minute, 25/day (free tier)
+                      • Supports batched requests for better efficiency
                     </p>
                   </div>
                 )}
