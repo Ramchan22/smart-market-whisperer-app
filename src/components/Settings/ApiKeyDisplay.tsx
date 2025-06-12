@@ -11,9 +11,9 @@ import { Badge } from '@/components/ui/badge';
 
 const ApiKeyDisplay = () => {
   const [copied, setCopied] = useState(false);
-  const [dataProvider, setDataProvider] = useState('alphavantage'); // Default to live
+  const [dataProvider, setDataProvider] = useState('fcs');
   const [rateLimitReached, setRateLimitReached] = useState(false);
-  const apiKey = marketDataService.getApiKey();
+  const apiKey = marketDataService.getFCSApiKey();
   
   // Get the current data provider and rate limit status on component mount
   useEffect(() => {
@@ -25,10 +25,10 @@ const ApiKeyDisplay = () => {
       setRateLimitReached(true);
     };
     
-    window.addEventListener('alphavantage-rate-limit', handleRateLimit);
+    window.addEventListener('fcs-rate-limit', handleRateLimit);
     
     return () => {
-      window.removeEventListener('alphavantage-rate-limit', handleRateLimit);
+      window.removeEventListener('fcs-rate-limit', handleRateLimit);
     };
   }, []);
   
@@ -42,8 +42,8 @@ const ApiKeyDisplay = () => {
     }, 2000);
   };
   
-  const openAlphaVantageWebsite = () => {
-    window.open('https://www.alphavantage.co/premium/', '_blank');
+  const openFCSWebsite = () => {
+    window.open('https://fcsapi.com/', '_blank');
   };
   
   const resetRateLimit = () => {
@@ -57,13 +57,13 @@ const ApiKeyDisplay = () => {
       <CardHeader>
         <div className="flex justify-between items-center">
           <div>
-            <CardTitle>Alpha Vantage API Key</CardTitle>
-            <CardDescription>Your API key for accessing live market data</CardDescription>
+            <CardTitle>FCS API Key</CardTitle>
+            <CardDescription>Your API key for accessing live forex market data</CardDescription>
           </div>
           
           <div className="flex items-center gap-2">
-            <Badge variant={dataProvider === 'alphavantage' ? 'default' : 'outline'}>
-              {dataProvider === 'alphavantage' ? 'Live' : 'Demo'}
+            <Badge variant={dataProvider === 'fcs' ? 'default' : 'outline'}>
+              {dataProvider === 'fcs' ? 'Live' : 'Demo'}
             </Badge>
             
             {rateLimitReached && (
@@ -86,12 +86,12 @@ const ApiKeyDisplay = () => {
         
         <div className="space-y-2">
           <p className="text-sm text-muted-foreground">
-            This key is used to access Alpha Vantage's forex data APIs.
+            This key is used to access FCS API's forex data endpoints.
             <br/>
             {dataProvider === 'demo' ? (
-              "You're currently using demo data. Switch to Alpha Vantage in settings to use this API key."
+              "You're currently using demo data. Switch to FCS API in settings to use this API key."
             ) : (
-              "You're now using live market data where available."
+              "You're now using live market data from FCS API."
             )}
           </p>
           
@@ -100,15 +100,15 @@ const ApiKeyDisplay = () => {
               <div className="flex items-start gap-2">
                 <AlertCircle className="h-4 w-4 mt-0.5" />
                 <div>
-                  <strong>API Rate Limit Reached:</strong> Standard free accounts are limited to 25 requests per day.
+                  <strong>API Rate Limit Reached:</strong> FCS API free accounts are limited to 500 requests per month.
                   <div className="flex items-center gap-3 mt-2">
                     <Button 
                       variant="outline" 
                       size="sm" 
                       className="text-destructive border-destructive/30 flex items-center gap-1"
-                      onClick={openAlphaVantageWebsite}
+                      onClick={openFCSWebsite}
                     >
-                      Upgrade to Premium <ExternalLink className="h-3 w-3 ml-1" />
+                      Visit FCS API <ExternalLink className="h-3 w-3 ml-1" />
                     </Button>
                     <Button
                       variant="outline"
