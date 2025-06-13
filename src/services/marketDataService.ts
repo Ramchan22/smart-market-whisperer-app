@@ -244,51 +244,58 @@ export const marketDataService = {
     toast.success('API rate limit status has been reset');
   },
 
-  // Fetch current forex rates for watchlist using FCS API
+  // Fetch current forex rates for watchlist using FCS API with batch request
   fetchWatchlistData: async (): Promise<ForexRate[]> => {
     try {
-      console.log('Fetching watchlist data from FCS API...');
+      console.log('Fetching watchlist data from FCS API using batch request...');
       
       const rates: ForexRate[] = [];
       
-      for (let i = 0; i < CURRENCY_PAIRS.length; i++) {
-        const pair = CURRENCY_PAIRS[i];
-        
-        try {
-          const [base, quote] = pair.split('/');
-          const symbol = `${base}${quote}`;
-          
-          console.log(`Fetching data for ${pair} (${i + 1}/${CURRENCY_PAIRS.length})...`);
-          
-          const data = await fetchFromFCS('forex/latest', { 
-            symbol: symbol
-          });
-          
-          if (data.status && data.response && data.response.length > 0) {
-            const item = data.response[0];
-            const price = parseFloat(item.c);
-            const change = parseFloat(item.ch);
-            const changePercent = parseFloat(item.cp);
+      // Convert currency pairs to FCS format and join them for batch request
+      const symbols = CURRENCY_PAIRS.map(pair => pair.replace('/', '')).join(',');
+      
+      console.log(`Fetching data for all pairs in single request: ${symbols}`);
+      
+      const data = await fetchFromFCS('forex/latest', { 
+        symbol: symbols
+      });
+      
+      if (data.status && data.response && data.response.length > 0) {
+        // Process each currency pair from the batch response
+        data.response.forEach((item: any) => {
+          try {
+            // Convert symbol back to pair format (e.g., EURUSD -> EUR/USD)
+            const symbol = item.s || item.symbol;
+            if (!symbol) return;
             
-            rates.push({
-              pair,
-              bid: (price - 0.0002).toFixed(pair.includes('JPY') ? 2 : 4),
-              ask: price.toFixed(pair.includes('JPY') ? 2 : 4),
-              change: `${changePercent.toFixed(2)}%`,
-              changeDirection: change >= 0 ? 'up' : 'down'
-            });
+            const pair = symbol.length === 6 ? 
+              `${symbol.substring(0, 3)}/${symbol.substring(3, 6)}` : 
+              symbol;
+            
+            // Only process pairs that are in our watchlist
+            if (CURRENCY_PAIRS.includes(pair)) {
+              const price = parseFloat(item.c);
+              const change = parseFloat(item.ch);
+              const changePercent = parseFloat(item.cp);
+              
+              rates.push({
+                pair,
+                bid: (price - 0.0002).toFixed(pair.includes('JPY') ? 2 : 4),
+                ask: price.toFixed(pair.includes('JPY') ? 2 : 4),
+                change: `${changePercent.toFixed(2)}%`,
+                changeDirection: change >= 0 ? 'up' : 'down'
+              });
+            }
+          } catch (error) {
+            console.error(`Failed to process data for symbol:`, item, error);
           }
-          
-        } catch (error) {
-          console.error(`Failed to fetch ${pair}:`, error);
-          // Continue with other pairs even if one fails
-        }
+        });
       }
       
       if (rates.length > 0) {
-        toast.success(`Loaded ${rates.length} live forex rates from FCS API`);
+        toast.success(`Loaded ${rates.length} live forex rates from FCS API (batch request)`);
       } else {
-        toast.error('No live forex data available');
+        toast.error('No live forex data available from batch request');
       }
       
       return rates;
