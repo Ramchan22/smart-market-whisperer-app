@@ -78,6 +78,9 @@ const TIME_FRAMES = {
   lower: ['5M', '3M']
 };
 
+// Helper function to add delay between API requests
+const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
 // Helper function to fetch data from FCS API
 const fetchFromFCS = async (endpoint: string, params: Record<string, string> = {}) => {
   const url = new URL(`${API_CONFIG.FCS_BASE_URL}/${endpoint}`);
@@ -242,18 +245,21 @@ export const marketDataService = {
     toast.success('API rate limit status has been reset');
   },
 
-  // Fetch current forex rates for watchlist using FCS API
+  // Fetch current forex rates for watchlist using FCS API with rate limiting
   fetchWatchlistData: async (): Promise<ForexRate[]> => {
     try {
-      console.log('Fetching watchlist data from FCS API...');
+      console.log('Fetching watchlist data from FCS API with rate limiting...');
       
-      // Use individual pair requests to avoid parameter issues
       const rates: ForexRate[] = [];
       
-      for (const pair of CURRENCY_PAIRS) {
+      for (let i = 0; i < CURRENCY_PAIRS.length; i++) {
+        const pair = CURRENCY_PAIRS[i];
+        
         try {
           const [base, quote] = pair.split('/');
           const symbol = `${base}${quote}`;
+          
+          console.log(`Fetching data for ${pair} (${i + 1}/${CURRENCY_PAIRS.length})...`);
           
           const data = await fetchFromFCS('forex/latest', { 
             symbol: symbol
@@ -274,12 +280,15 @@ export const marketDataService = {
             });
           }
           
-          // Small delay between requests to avoid rate limits
-          await new Promise(resolve => setTimeout(resolve, 100));
+          // Add 2-second delay between requests to respect FCS API rate limits
+          if (i < CURRENCY_PAIRS.length - 1) {
+            console.log(`Waiting 2 seconds before next request to respect API rate limits...`);
+            await delay(2000);
+          }
           
         } catch (error) {
           console.error(`Failed to fetch ${pair}:`, error);
-          // Continue with other pairs
+          // Continue with other pairs even if one fails
         }
       }
       
@@ -298,16 +307,22 @@ export const marketDataService = {
     }
   },
   
-  // Fetch trade signals based on current market conditions
+  // Fetch trade signals based on current market conditions with rate limiting
   fetchTradeSignals: async (): Promise<TradeSignal[]> => {
     try {
-      console.log('Fetching live market data for trade signals from FCS API...');
+      console.log('Fetching live market data for trade signals from FCS API with rate limiting...');
       const allSignals: TradeSignal[] = [];
       
-      // Fetch historical data for signal analysis from FCS
-      for (const pair of CURRENCY_PAIRS.slice(0, 3)) { // Limit to 3 pairs to stay within rate limits
+      // Limit to 3 pairs to stay within rate limits and add delays
+      const limitedPairs = CURRENCY_PAIRS.slice(0, 3);
+      
+      for (let i = 0; i < limitedPairs.length; i++) {
+        const pair = limitedPairs[i];
+        
         try {
           const [base, quote] = pair.split('/');
+          console.log(`Fetching historical data for ${pair} (${i + 1}/${limitedPairs.length})...`);
+          
           const historicalData = await fetchFromFCS('forex/history', {
             symbol: `${base}${quote}`,
             period: '1D',
@@ -332,8 +347,11 @@ export const marketDataService = {
             console.log(`Generated ${pairSignals.length} signals for ${pair} based on FCS data`);
           }
           
-          // Delay between requests to avoid rate limits
-          await new Promise(resolve => setTimeout(resolve, 200));
+          // Add 2-second delay between requests to respect FCS API rate limits
+          if (i < limitedPairs.length - 1) {
+            console.log(`Waiting 2 seconds before next request to respect API rate limits...`);
+            await delay(2000);
+          }
           
         } catch (error) {
           console.error(`Failed to fetch signals for ${pair}:`, error);
