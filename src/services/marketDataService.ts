@@ -1,4 +1,3 @@
-
 import { toast } from 'sonner';
 
 // API configuration
@@ -245,10 +244,10 @@ export const marketDataService = {
     toast.success('API rate limit status has been reset');
   },
 
-  // Fetch current forex rates for watchlist using FCS API with rate limiting
+  // Fetch current forex rates for watchlist using FCS API
   fetchWatchlistData: async (): Promise<ForexRate[]> => {
     try {
-      console.log('Fetching watchlist data from FCS API with rate limiting...');
+      console.log('Fetching watchlist data from FCS API...');
       
       const rates: ForexRate[] = [];
       
@@ -280,12 +279,6 @@ export const marketDataService = {
             });
           }
           
-          // Add 2-second delay between requests to respect FCS API rate limits
-          if (i < CURRENCY_PAIRS.length - 1) {
-            console.log(`Waiting 2 seconds before next request to respect API rate limits...`);
-            await delay(2000);
-          }
-          
         } catch (error) {
           console.error(`Failed to fetch ${pair}:`, error);
           // Continue with other pairs even if one fails
@@ -307,13 +300,13 @@ export const marketDataService = {
     }
   },
   
-  // Fetch trade signals based on current market conditions with rate limiting
+  // Fetch trade signals based on current market conditions
   fetchTradeSignals: async (): Promise<TradeSignal[]> => {
     try {
-      console.log('Fetching live market data for trade signals from FCS API with rate limiting...');
+      console.log('Fetching live market data for trade signals from FCS API...');
       const allSignals: TradeSignal[] = [];
       
-      // Limit to 3 pairs to stay within rate limits and add delays
+      // Limit to 3 pairs to stay within rate limits
       const limitedPairs = CURRENCY_PAIRS.slice(0, 3);
       
       for (let i = 0; i < limitedPairs.length; i++) {
@@ -345,12 +338,6 @@ export const marketDataService = {
             const pairSignals = analyzeMarketData(timeSeriesData, pair);
             allSignals.push(...pairSignals);
             console.log(`Generated ${pairSignals.length} signals for ${pair} based on FCS data`);
-          }
-          
-          // Add 2-second delay between requests to respect FCS API rate limits
-          if (i < limitedPairs.length - 1) {
-            console.log(`Waiting 2 seconds before next request to respect API rate limits...`);
-            await delay(2000);
           }
           
         } catch (error) {
