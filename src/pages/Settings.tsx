@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import Header from '@/components/Layout/Header';
 import Footer from '@/components/Layout/Footer';
@@ -15,16 +16,10 @@ import { marketDataService } from '@/services/marketDataService';
 
 const Settings = () => {
   const { toast } = useToast();
-  const [dataProvider, setDataProvider] = useState('fcs');
-  const [realTimeData, setRealTimeData] = useState(true);
   const [fcsApiKey, setFcsApiKey] = useState('hczDhp413qSmqzjLlVNuhRuFdwuJv');
   
   // Load current settings
   useEffect(() => {
-    const currentProvider = marketDataService.getDataProvider();
-    setDataProvider(currentProvider);
-    setRealTimeData(currentProvider !== 'demo');
-    
     // Load FCS API key from localStorage or use the configured one
     const savedFcsKey = localStorage.getItem('fcs_api_key');
     if (savedFcsKey) {
@@ -33,9 +28,6 @@ const Settings = () => {
   }, []);
 
   const handleSave = () => {
-    // Save all settings
-    marketDataService.setDataProvider(dataProvider);
-    
     // Save FCS API key if provided
     if (fcsApiKey && fcsApiKey !== 'YOUR_FCS_API_KEY') {
       marketDataService.setFCSApiKey(fcsApiKey);
@@ -45,11 +37,6 @@ const Settings = () => {
       title: "Settings saved",
       description: "Your preferences have been updated successfully.",
     });
-  };
-  
-  const handleDataProviderChange = (value: string) => {
-    setDataProvider(value);
-    setRealTimeData(value !== 'demo');
   };
 
   const handleFcsApiKeyChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -205,72 +192,56 @@ const Settings = () => {
             <Card>
               <CardHeader>
                 <CardTitle>API Settings</CardTitle>
-                <CardDescription>Configure data provider settings</CardDescription>
+                <CardDescription>Live market data powered by FCS API</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="space-y-2">
                   <Label htmlFor="data-provider">Data Provider</Label>
-                  <Select 
-                    value={dataProvider} 
-                    onValueChange={handleDataProviderChange}
-                  >
+                  <Select value="fcs" disabled>
                     <SelectTrigger id="data-provider">
                       <SelectValue placeholder="Select provider" />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="fcs">FCS API (Live Data - 500 requests/month)</SelectItem>
-                      <SelectItem value="demo">Demo (Sample Data)</SelectItem>
                     </SelectContent>
                   </Select>
                   <p className="text-xs text-muted-foreground">
-                    FCS API supports batched requests for all currency pairs in one call, avoiding rate limits.
+                    Application is configured to use only live FCS API data with proper rate limiting.
                   </p>
                 </div>
 
-                {dataProvider === 'fcs' && (
-                  <div className="space-y-2">
-                    <Label htmlFor="fcs-api-key">FCS API Key</Label>
-                    <Input 
-                      id="fcs-api-key" 
-                      type="password" 
-                      value={fcsApiKey}
-                      onChange={handleFcsApiKeyChange}
-                      placeholder="Enter your FCS API key" 
-                    />
-                    <p className="text-xs text-green-600">
-                      ✓ FCS API key is configured and ready to use
-                    </p>
-                  </div>
-                )}
+                <div className="space-y-2">
+                  <Label htmlFor="fcs-api-key">FCS API Key</Label>
+                  <Input 
+                    id="fcs-api-key" 
+                    type="password" 
+                    value={fcsApiKey}
+                    onChange={handleFcsApiKeyChange}
+                    placeholder="Enter your FCS API key" 
+                  />
+                  <p className="text-xs text-green-600">
+                    ✓ FCS API key is configured and ready to use
+                  </p>
+                </div>
                 
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
                     <Label htmlFor="real-time-data">Real-time Data</Label>
-                    <Switch 
-                      id="real-time-data" 
-                      checked={realTimeData}
-                      onCheckedChange={(checked) => {
-                        setRealTimeData(checked);
-                        setDataProvider(checked ? 'fcs' : 'demo');
-                      }}
-                    />
+                    <Switch id="real-time-data" checked={true} disabled />
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    {realTimeData 
-                      ? "Live trading data is enabled with FCS API" 
-                      : "Using demo data mode (no API calls)"}
+                    Live trading data is always enabled with FCS API
                   </p>
                 </div>
 
-                {dataProvider !== 'demo' && (
-                  <div className="p-3 bg-blue-50 rounded-md">
-                    <p className="text-sm text-blue-800">
-                      <strong>Rate Limit Info:</strong><br/>
-                      • FCS API: Up to 500 requests/month (free tier)<br/>
-                      • Supports batched requests for better efficiency
-                    </p>
-                  </div>
-                )}
+                <div className="p-3 bg-blue-50 rounded-md">
+                  <p className="text-sm text-blue-800">
+                    <strong>Rate Limit Info:</strong><br/>
+                    • FCS API: Up to 500 requests/month (free tier)<br/>
+                    • 2-second delays between requests to respect API limits<br/>
+                    • Automatic error handling for rate limit scenarios
+                  </p>
+                </div>
               </CardContent>
             </Card>
           </div>
