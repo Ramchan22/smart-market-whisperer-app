@@ -120,16 +120,24 @@ const analyzeMarketData = (timeSeriesData: any, pair: string): TradeSignal[] => 
 
   console.log(`Analyzing ${timeSeriesData.length} candles for ${pair}`);
 
-  // Convert FCS data format to our analysis format
-  const recentData = timeSeriesData.slice(0, 5).map((item: any) => ({
-    date: new Date(item.tm * 1000).toISOString(),
-    open: parseFloat(item.o),
-    high: parseFloat(item.h),
-    low: parseFloat(item.l),
-    close: parseFloat(item.c)
-  }));
+  // Convert FCS data format to our analysis format with improved timestamp handling
+  const recentData = timeSeriesData.slice(0, 5).map((item: any) => {
+    const timestamp = Number(item.tm);
+    const date = !isNaN(timestamp) ? new Date(timestamp * 1000).toISOString() : "Invalid Date";
 
-  if (recentData.length < 2) return signals;
+    return {
+      date,
+      open: parseFloat(item.o),
+      high: parseFloat(item.h),
+      low: parseFloat(item.l),
+      close: parseFloat(item.c)
+    };
+  }).filter(data => data.date !== "Invalid Date");  // Remove bad entries
+
+  if (recentData.length < 2) {
+    console.log(`Not enough valid data for ${pair}: ${recentData.length} valid candles`);
+    return signals;
+  }
 
   const latest = recentData[0];
   const previous = recentData[1];

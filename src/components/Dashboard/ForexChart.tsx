@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { useToast } from '@/hooks/use-toast';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -61,7 +60,7 @@ const ForexChart: React.FC<ForexChartProps> = ({ onDataUpdate }) => {
       script.type = 'text/javascript';
       script.async = true;
       
-      // Create safer widget configuration
+      // Improved widget configuration to avoid 403 errors
       const widgetConfig = {
         "autosize": true,
         "symbol": `FX:${currencyPair.replace('/', '')}`,
@@ -77,21 +76,16 @@ const ForexChart: React.FC<ForexChartProps> = ({ onDataUpdate }) => {
         "hide_legend": false,
         "save_image": false,
         "container_id": "tradingview_chart",
-        "studies": [
-          "STD;SMA",
-          "STD;EMA"
-        ],
         "toolbar_bg": "#f1f3f6",
         "withdateranges": true,
         "hide_side_toolbar": false,
         "allow_symbol_change": false,
-        "details": true,
-        "hotlist": true,
-        "calendar": true,
-        "show_popup_button": true,
+        "details": false,
+        "hotlist": false,
+        "calendar": false,
+        "show_popup_button": false,
         "popup_width": "1000",
-        "popup_height": "650",
-        "studies_overrides": {}
+        "popup_height": "650"
       };
 
       // Safely stringify the configuration
