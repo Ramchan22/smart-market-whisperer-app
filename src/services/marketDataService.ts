@@ -255,13 +255,11 @@ export const marketDataService = {
         const pair = CURRENCY_PAIRS[i];
         
         try {
-          const [base, quote] = pair.split('/');
-          const symbol = `${base}${quote}`;
-          
           console.log(`Fetching data for ${pair} (${i + 1}/${CURRENCY_PAIRS.length})...`);
           
+          // Use the pair format directly as FCS API expects 'GBP/JPY' format
           const data = await fetchFromFCS('forex/latest', { 
-            symbol: symbol
+            symbol: pair
           });
           
           if (data.status && data.response && data.response.length > 0) {
@@ -313,11 +311,11 @@ export const marketDataService = {
         const pair = limitedPairs[i];
         
         try {
-          const [base, quote] = pair.split('/');
           console.log(`Fetching historical data for ${pair} (${i + 1}/${limitedPairs.length})...`);
           
+          // Use the pair format directly for historical data as well
           const historicalData = await fetchFromFCS('forex/history', {
-            symbol: `${base}${quote}`,
+            symbol: pair,
             period: '1D',
             limit: '10'
           });
@@ -372,9 +370,9 @@ export const marketDataService = {
     try {
       console.log('Fetching SMC patterns from FCS API...');
       
-      // Fetch real daily forex data from FCS API
+      // Fetch real daily forex data from FCS API using correct format
       const data = await fetchFromFCS('forex/history', {
-        symbol: 'EURUSD',
+        symbol: 'EUR/USD',
         period: '1D',
         limit: '5'
       });
