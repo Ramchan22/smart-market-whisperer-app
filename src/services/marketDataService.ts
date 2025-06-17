@@ -1,3 +1,4 @@
+
 import { toast } from 'sonner';
 
 // API configuration
@@ -358,13 +359,27 @@ export const marketDataService = {
             limit: '20'   // Get more data points
           });
           
-          if (historicalData.status && historicalData.response && historicalData.response.length > 0) {
-            console.log(`Received ${historicalData.response.length} data points for ${pair}`);
+          if (historicalData.status && historicalData.response) {
+            // Handle both object and array response formats
+            let timeSeriesArray = [];
             
-            // Analyze the data directly using FCS response format
-            const pairSignals = analyzeMarketData(historicalData.response, pair);
-            allSignals.push(...pairSignals);
-            console.log(`Generated ${pairSignals.length} signals for ${pair}`);
+            if (Array.isArray(historicalData.response)) {
+              timeSeriesArray = historicalData.response;
+            } else if (typeof historicalData.response === 'object') {
+              // Convert object to array if needed
+              timeSeriesArray = Object.values(historicalData.response);
+            }
+            
+            console.log(`Received ${timeSeriesArray.length} data points for ${pair}`, timeSeriesArray);
+            
+            if (timeSeriesArray.length > 0) {
+              // Analyze the data directly using FCS response format
+              const pairSignals = analyzeMarketData(timeSeriesArray, pair);
+              allSignals.push(...pairSignals);
+              console.log(`Generated ${pairSignals.length} signals for ${pair}`);
+            } else {
+              console.warn(`No time series data available for ${pair}`);
+            }
           } else {
             console.warn(`No historical data received for ${pair}:`, historicalData);
           }
