@@ -1,4 +1,3 @@
-
 import { toast } from 'sonner';
 
 // API configuration
@@ -281,6 +280,11 @@ export const marketDataService = {
   resetRateLimitStatus: (): void => {
     isRateLimitReached = false;
     toast.success('API rate limit status has been reset');
+  },
+
+  // Expose FCS API helper for external use
+  fetchFromFCS: async (endpoint: string, params: Record<string, string> = {}) => {
+    return await fetchFromFCS(endpoint, params);
   },
 
   // Fetch current forex rates for watchlist using FCS API

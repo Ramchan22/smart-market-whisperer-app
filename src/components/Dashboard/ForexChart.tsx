@@ -8,13 +8,13 @@ import { marketDataService } from '@/services/marketDataService';
 import { Loader2, TrendingUp, TrendingDown } from 'lucide-react';
 
 const currencyPairs = [
-  { value: 'EURUSD', label: 'EUR/USD' },
-  { value: 'USDJPY', label: 'USD/JPY' },
-  { value: 'GBPUSD', label: 'GBP/USD' },
-  { value: 'AUDUSD', label: 'AUD/USD' },
-  { value: 'EURGBP', label: 'EUR/GBP' },
-  { value: 'EURCHF', label: 'EUR/CHF' },
-  { value: 'GBPJPY', label: 'GBP/JPY' },
+  { value: 'EUR/USD', label: 'EUR/USD' },
+  { value: 'USD/JPY', label: 'USD/JPY' },
+  { value: 'GBP/USD', label: 'GBP/USD' },
+  { value: 'AUD/USD', label: 'AUD/USD' },
+  { value: 'EUR/GBP', label: 'EUR/GBP' },
+  { value: 'EUR/CHF', label: 'EUR/CHF' },
+  { value: 'GBP/JPY', label: 'GBP/JPY' },
 ];
 
 const timeframes = [
@@ -40,13 +40,12 @@ interface ForexChartProps {
 }
 
 const ForexChart: React.FC<ForexChartProps> = ({ onDataUpdate }) => {
-  const [currencyPair, setCurrencyPair] = useState('GBPUSD');
+  const [currencyPair, setCurrencyPair] = useState('GBP/USD');
   const [timeframe, setTimeframe] = useState('D');
   const [chartData, setChartData] = useState<ChartDataPoint[]>([]);
   const [loading, setLoading] = useState(false);
   const [currentPrice, setCurrentPrice] = useState<number | null>(null);
   const [priceChange, setPriceChange] = useState<number | null>(null);
-  const [dataProvider, setDataProvider] = useState('demo');
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
 
@@ -61,9 +60,11 @@ const ForexChart: React.FC<ForexChartProps> = ({ onDataUpdate }) => {
       script.src = 'https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js';
       script.type = 'text/javascript';
       script.async = true;
-      script.innerHTML = JSON.stringify({
+      
+      // Create safer widget configuration
+      const widgetConfig = {
         "autosize": true,
-        "symbol": `FX:${currencyPair}`,
+        "symbol": `FX:${currencyPair.replace('/', '')}`,
         "interval": timeframe,
         "timezone": "Etc/UTC",
         "theme": "dark",
@@ -91,7 +92,15 @@ const ForexChart: React.FC<ForexChartProps> = ({ onDataUpdate }) => {
         "popup_width": "1000",
         "popup_height": "650",
         "studies_overrides": {}
-      });
+      };
+
+      // Safely stringify the configuration
+      try {
+        script.innerHTML = JSON.stringify(widgetConfig);
+      } catch (error) {
+        console.error('Error creating TradingView widget config:', error);
+        return;
+      }
 
       // Create container for TradingView widget
       const widgetContainer = document.createElement('div');
@@ -120,117 +129,71 @@ const ForexChart: React.FC<ForexChartProps> = ({ onDataUpdate }) => {
     }
     
     try {
-      const provider = marketDataService.getDataProvider();
-      setDataProvider(provider);
-
-      if (provider === 'demo' || marketDataService.isRateLimitReached()) {
-        // Generate demo chart data
-        const demoData = generateDemoChartData();
-        setChartData(demoData);
-        setCurrentPrice(demoData[demoData.length - 1]?.close || 0);
-        setPriceChange(Math.random() * 0.002 - 0.001); // Random change
-        
-        // Notify parent component
-        if (onDataUpdate) {
-          onDataUpdate(demoData, currencyPair, false);
-        }
-        return;
-      }
-
-      // Fetch live data from Alpha Vantage for trade signals
-      const baseCurrency = currencyPair.slice(0, 3);
-      const quoteCurrency = currencyPair.slice(3);
+      console.log(`Fetching chart data for ${currencyPair} from FCS API...`);
       
-      let apiFunction = 'FX_DAILY';
-      if (timeframe === '1') apiFunction = 'FX_INTRADAY&interval=1min';
-      else if (timeframe === '5') apiFunction = 'FX_INTRADAY&interval=5min';
-      else if (timeframe === '15') apiFunction = 'FX_INTRADAY&interval=15min';
-      else if (timeframe === '60') apiFunction = 'FX_INTRADAY&interval=60min';
-
-      const response = await fetch(
-        `https://www.alphavantage.co/query?function=${apiFunction}&from_symbol=${baseCurrency}&to_symbol=${quoteCurrency}&apikey=AP4TB68V97NKRA53`
-      );
-      const data = await response.json();
+      // Use FCS API for historical data
+      const data = await marketDataService.fetchFromFCS('forex/history', {
+        symbol: currencyPair,
+        period: timeframe === 'D' ? '1D' : '1H',
+        limit: '30'
+      });
 
       console.log('Chart API response:', data);
 
-      // Check for rate limit
-      if (data['Information'] && data['Information'].includes('API rate limit')) {
-        console.warn('API rate limit reached for chart data');
-        toast({
-          title: "API Limit Reached",
-          description: "Chart displaying live data, but using demo data for signals",
-          variant: "destructive"
-        });
-        const demoData = generateDemoChartData();
-        setChartData(demoData);
-        setCurrentPrice(demoData[demoData.length - 1]?.close || 0);
-        setPriceChange(Math.random() * 0.002 - 0.001);
+      if (data.status && data.response) {
+        // Handle both object and array response formats
+        let timeSeriesArray = [];
         
-        // Notify parent component
-        if (onDataUpdate) {
-          onDataUpdate(demoData, currencyPair, false);
+        if (Array.isArray(data.response)) {
+          timeSeriesArray = data.response;
+        } else if (typeof data.response === 'object') {
+          timeSeriesArray = Object.values(data.response);
         }
-        return;
+
+        // Convert to chart format
+        const processedData: ChartDataPoint[] = timeSeriesArray
+          .slice(0, 30)
+          .map((item: any) => ({
+            time: new Date(item.tm).toLocaleDateString(),
+            open: parseFloat(item.o),
+            high: parseFloat(item.h),
+            low: parseFloat(item.l),
+            close: parseFloat(item.c),
+          }))
+          .reverse();
+
+        setChartData(processedData);
+        
+        if (processedData.length > 0) {
+          const latest = processedData[processedData.length - 1];
+          const previous = processedData[processedData.length - 2];
+          setCurrentPrice(latest.close);
+          setPriceChange(previous ? latest.close - previous.close : 0);
+        }
+
+        // Notify parent component with live data
+        if (onDataUpdate) {
+          onDataUpdate(processedData, currencyPair, false);
+        }
+
+        toast({
+          title: "Live Data Loaded",
+          description: `Chart updated with live FCS data for ${currencyPair}`,
+        });
+
+      } else {
+        throw new Error('No data available from FCS API');
       }
-
-      // Parse the time series data
-      let timeSeriesKey = 'Time Series FX (Daily)';
-      if (timeframe !== 'D') {
-        const intervalMap: { [key: string]: string } = {
-          '1': '1min',
-          '5': '5min', 
-          '15': '15min',
-          '60': '60min'
-        };
-        timeSeriesKey = `Time Series FX (${intervalMap[timeframe]})`;
-      }
-
-      const timeSeries = data[timeSeriesKey];
-      if (!timeSeries) {
-        throw new Error('No time series data available');
-      }
-
-      // Convert to chart format
-      const processedData: ChartDataPoint[] = Object.entries(timeSeries)
-        .slice(0, 30) // Last 30 data points
-        .map(([time, values]: [string, any]) => ({
-          time: new Date(time).toLocaleDateString(),
-          open: parseFloat(values['1. open']),
-          high: parseFloat(values['2. high']),
-          low: parseFloat(values['3. low']),
-          close: parseFloat(values['4. close']),
-        }))
-        .reverse(); // Show chronological order
-
-      setChartData(processedData);
-      
-      if (processedData.length > 0) {
-        const latest = processedData[processedData.length - 1];
-        const previous = processedData[processedData.length - 2];
-        setCurrentPrice(latest.close);
-        setPriceChange(previous ? latest.close - previous.close : 0);
-      }
-
-      // Notify parent component with live data
-      if (onDataUpdate) {
-        onDataUpdate(processedData, currencyPair, false);
-      }
-
-      toast({
-        title: "Live Data Loaded",
-        description: `Chart and signals updated with live data for ${currencyPair}`,
-      });
 
     } catch (error) {
       console.error('Error fetching chart data:', error);
       toast({
         title: "Error Loading Data",
-        description: "Chart showing live data, using demo data for signals",
+        description: "Using demo data for chart",
         variant: "destructive"
       });
       
-      // Fallback to demo data for signals
+      // Fallback to demo data
       const demoData = generateDemoChartData();
       setChartData(demoData);
       setCurrentPrice(demoData[demoData.length - 1]?.close || 0);
@@ -279,7 +242,7 @@ const ForexChart: React.FC<ForexChartProps> = ({ onDataUpdate }) => {
     setCurrencyPair(value);
     toast({
       title: "Currency Pair Changed",
-      description: `Now viewing ${value.slice(0, 3)}/${value.slice(3)}`,
+      description: `Now viewing ${value}`,
       duration: 2000,
     });
   };
@@ -297,7 +260,7 @@ const ForexChart: React.FC<ForexChartProps> = ({ onDataUpdate }) => {
     <div className="bg-card rounded-lg p-4 shadow-md h-full">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-4 space-y-2 md:space-y-0">
         <div className="flex items-center gap-2">
-          <h2 className="text-xl font-bold">{currencyPair.slice(0, 3)}/{currencyPair.slice(3)}</h2>
+          <h2 className="text-xl font-bold">{currencyPair}</h2>
           <Badge variant="default" className="bg-blue-500">
             Live Chart
           </Badge>
