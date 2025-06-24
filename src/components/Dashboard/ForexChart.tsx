@@ -34,6 +34,14 @@ interface ChartDataPoint {
   volume?: number;
 }
 
+interface SMCMarker {
+  type: 'FVG' | 'BOS' | 'CHOCH';
+  direction: 'bullish' | 'bearish';
+  price: number;
+  time: string;
+  description: string;
+}
+
 interface ForexChartProps {
   onDataUpdate?: (data: ChartDataPoint[], pair: string, loading: boolean) => void;
 }
@@ -45,10 +53,101 @@ const ForexChart: React.FC<ForexChartProps> = ({ onDataUpdate }) => {
   const [loading, setLoading] = useState(false);
   const [currentPrice, setCurrentPrice] = useState<number | null>(null);
   const [priceChange, setPriceChange] = useState<number | null>(null);
+  const [smcMarkers, setSMCMarkers] = useState<SMCMarker[]>([]);
   const chartContainerRef = useRef<HTMLDivElement>(null);
+  const tradingViewWidgetRef = useRef<any>(null);
   const { toast } = useToast();
 
-  // Initialize TradingView widget
+  // Function to detect SMC patterns from live data
+  const detectSMCPatterns = (data: ChartDataPoint[]): SMCMarker[] => {
+    const markers: SMCMarker[] = [];
+    
+    if (data.length < 5) return markers;
+
+    // Sort data by time to ensure chronological order
+    const sortedData = [...data].sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
+
+    // Detect Fair Value Gaps (FVG)
+    for (let i = 2; i < sortedData.length; i++) {
+      const candle1 = sortedData[i - 2];
+      const candle2 = sortedData[i - 1];
+      const candle3 = sortedData[i];
+
+      // Bullish FVG: candle1.low > candle3.high
+      if (candle1.low > candle3.high) {
+        const gapSize = candle1.low - candle3.high;
+        const gapPercent = (gapSize / candle2.close) * 100;
+        
+        if (gapPercent > 0.02) { // Minimum 0.02% gap
+          markers.push({
+            type: 'FVG',
+            direction: 'bullish',
+            price: (candle1.low + candle3.high) / 2,
+            time: candle2.time,
+            description: `Bullish FVG (${gapPercent.toFixed(2)}% gap)`
+          });
+        }
+      }
+
+      // Bearish FVG: candle1.high < candle3.low
+      if (candle1.high < candle3.low) {
+        const gapSize = candle3.low - candle1.high;
+        const gapPercent = (gapSize / candle2.close) * 100;
+        
+        if (gapPercent > 0.02) {
+          markers.push({
+            type: 'FVG',
+            direction: 'bearish',
+            price: (candle1.high + candle3.low) / 2,
+            time: candle2.time,
+            description: `Bearish FVG (${gapPercent.toFixed(2)}% gap)`
+          });
+        }
+      }
+    }
+
+    // Detect Break of Structure (BOS) and Change of Character (CHOCH)
+    for (let i = 3; i < sortedData.length; i++) {
+      const current = sortedData[i];
+      const prev1 = sortedData[i - 1];
+      const prev2 = sortedData[i - 2];
+      const prev3 = sortedData[i - 3];
+
+      // Find recent highs and lows
+      const recentHigh = Math.max(prev1.high, prev2.high, prev3.high);
+      const recentLow = Math.min(prev1.low, prev2.low, prev3.low);
+
+      // Bullish BOS: Current high breaks above recent high
+      if (current.high > recentHigh && current.close > current.open) {
+        const isStrong = (current.close - current.open) / (current.high - current.low) > 0.6;
+        
+        markers.push({
+          type: isStrong ? 'BOS' : 'CHOCH',
+          direction: 'bullish',
+          price: current.high,
+          time: current.time,
+          description: `${isStrong ? 'Strong' : 'Weak'} Bullish ${isStrong ? 'BOS' : 'CHOCH'}`
+        });
+      }
+
+      // Bearish BOS: Current low breaks below recent low
+      if (current.low < recentLow && current.close < current.open) {
+        const isStrong = (current.open - current.close) / (current.high - current.low) > 0.6;
+        
+        markers.push({
+          type: isStrong ? 'BOS' : 'CHOCH',
+          direction: 'bearish',
+          price: current.low,
+          time: current.time,
+          description: `${isStrong ? 'Strong' : 'Weak'} Bearish ${isStrong ? 'BOS' : 'CHOCH'}`
+        });
+      }
+    }
+
+    return markers;
+  };
+
+  // Initialize TradingView widget with SMC markers
   useEffect(() => {
     if (chartContainerRef.current) {
       // Clear previous widget
@@ -60,7 +159,7 @@ const ForexChart: React.FC<ForexChartProps> = ({ onDataUpdate }) => {
       script.type = 'text/javascript';
       script.async = true;
       
-      // Improved widget configuration to avoid 403 errors
+      // Enhanced widget configuration with SMC studies
       const widgetConfig = {
         "autosize": true,
         "symbol": `FX:${currencyPair.replace('/', '')}`,
@@ -85,10 +184,22 @@ const ForexChart: React.FC<ForexChartProps> = ({ onDataUpdate }) => {
         "calendar": false,
         "show_popup_button": false,
         "popup_width": "1000",
-        "popup_height": "650"
+        "popup_height": "650",
+        "studies": [
+          "STD;Pivot_Points_Standard",
+          "STD;VWAP"
+        ],
+        "drawings_access": {
+          "type": "black",
+          "tools": [
+            { "name": "Regression Trend" },
+            { "name": "Trend Line" },
+            { "name": "Horizontal Line" },
+            { "name": "Rectangle" }
+          ]
+        }
       };
 
-      // Safely stringify the configuration
       try {
         script.innerHTML = JSON.stringify(widgetConfig);
       } catch (error) {
@@ -111,8 +222,72 @@ const ForexChart: React.FC<ForexChartProps> = ({ onDataUpdate }) => {
       widgetContainer.appendChild(script);
       
       chartContainerRef.current.appendChild(widgetContainer);
+
+      // Store reference for later use
+      tradingViewWidgetRef.current = widgetContainer;
     }
   }, [currencyPair, timeframe]);
+
+  // Add SMC marker overlay after chart loads
+  useEffect(() => {
+    if (smcMarkers.length > 0 && chartContainerRef.current) {
+      // Create SMC overlay
+      const overlay = document.createElement('div');
+      overlay.className = 'smc-overlay';
+      overlay.style.position = 'absolute';
+      overlay.style.top = '0';
+      overlay.style.left = '0';
+      overlay.style.right = '0';
+      overlay.style.bottom = '0';
+      overlay.style.pointerEvents = 'none';
+      overlay.style.zIndex = '10';
+
+      // Add markers to overlay
+      smcMarkers.forEach((marker, index) => {
+        const markerElement = document.createElement('div');
+        markerElement.className = `smc-marker smc-${marker.type.toLowerCase()}`;
+        markerElement.style.position = 'absolute';
+        markerElement.style.left = `${20 + (index * 60)}px`;
+        markerElement.style.top = `${20 + (index * 30)}px`;
+        markerElement.style.padding = '4px 8px';
+        markerElement.style.borderRadius = '4px';
+        markerElement.style.fontSize = '10px';
+        markerElement.style.fontWeight = 'bold';
+        markerElement.style.color = 'white';
+        markerElement.style.pointerEvents = 'auto';
+        markerElement.style.cursor = 'pointer';
+        markerElement.title = marker.description;
+
+        // Color coding for different SMC patterns
+        if (marker.type === 'FVG') {
+          markerElement.style.backgroundColor = marker.direction === 'bullish' ? '#10B981' : '#EF4444';
+          markerElement.textContent = `FVG ${marker.direction === 'bullish' ? '↑' : '↓'}`;
+        } else if (marker.type === 'BOS') {
+          markerElement.style.backgroundColor = marker.direction === 'bullish' ? '#3B82F6' : '#F59E0B';
+          markerElement.textContent = `BOS ${marker.direction === 'bullish' ? '↑' : '↓'}`;
+        } else if (marker.type === 'CHOCH') {
+          markerElement.style.backgroundColor = marker.direction === 'bullish' ? '#8B5CF6' : '#EC4899';
+          markerElement.textContent = `CHoCH ${marker.direction === 'bullish' ? '↑' : '↓'}`;
+        }
+
+        overlay.appendChild(markerElement);
+      });
+
+      // Find chart container and add overlay
+      const chartDiv = chartContainerRef.current.querySelector('#tradingview_chart');
+      if (chartDiv) {
+        chartDiv.style.position = 'relative';
+        chartDiv.appendChild(overlay);
+      }
+
+      // Cleanup function
+      return () => {
+        if (overlay && overlay.parentNode) {
+          overlay.parentNode.removeChild(overlay);
+        }
+      };
+    }
+  }, [smcMarkers]);
 
   const fetchChartData = async () => {
     setLoading(true);
@@ -158,6 +333,10 @@ const ForexChart: React.FC<ForexChartProps> = ({ onDataUpdate }) => {
 
         setChartData(processedData);
         
+        // Detect SMC patterns from live data
+        const detectedMarkers = detectSMCPatterns(processedData);
+        setSMCMarkers(detectedMarkers);
+        
         if (processedData.length > 0) {
           const latest = processedData[processedData.length - 1];
           const previous = processedData[processedData.length - 2];
@@ -172,7 +351,7 @@ const ForexChart: React.FC<ForexChartProps> = ({ onDataUpdate }) => {
 
         toast({
           title: "Live Data Loaded",
-          description: `Chart updated with live FCS data for ${currencyPair}`,
+          description: `Chart updated with live data and ${detectedMarkers.length} SMC patterns detected`,
         });
 
       } else {
@@ -192,6 +371,10 @@ const ForexChart: React.FC<ForexChartProps> = ({ onDataUpdate }) => {
       setChartData(demoData);
       setCurrentPrice(demoData[demoData.length - 1]?.close || 0);
       setPriceChange(Math.random() * 0.002 - 0.001);
+      
+      // Generate demo SMC markers
+      const demoMarkers = detectSMCPatterns(demoData);
+      setSMCMarkers(demoMarkers);
       
       // Notify parent component
       if (onDataUpdate) {
@@ -258,6 +441,11 @@ const ForexChart: React.FC<ForexChartProps> = ({ onDataUpdate }) => {
           <Badge variant="default" className="bg-blue-500">
             Live Chart
           </Badge>
+          {smcMarkers.length > 0 && (
+            <Badge variant="secondary" className="bg-green-500">
+              {smcMarkers.length} SMC Patterns
+            </Badge>
+          )}
         </div>
         
         <div className="flex flex-wrap gap-2 items-center">
@@ -298,6 +486,29 @@ const ForexChart: React.FC<ForexChartProps> = ({ onDataUpdate }) => {
         </div>
       </div>
 
+      {/* SMC Pattern Summary */}
+      {smcMarkers.length > 0 && (
+        <div className="mb-4 p-3 bg-muted rounded-md">
+          <h3 className="text-sm font-semibold mb-2">Detected SMC Patterns:</h3>
+          <div className="flex flex-wrap gap-2">
+            {smcMarkers.map((marker, index) => (
+              <Badge 
+                key={index}
+                variant="outline" 
+                className={`text-xs ${
+                  marker.type === 'FVG' ? 'border-green-500 text-green-500' :
+                  marker.type === 'BOS' ? 'border-blue-500 text-blue-500' :
+                  'border-purple-500 text-purple-500'
+                }`}
+                title={marker.description}
+              >
+                {marker.type} {marker.direction === 'bullish' ? '↑' : '↓'}
+              </Badge>
+            ))}
+          </div>
+        </div>
+      )}
+
       {currentPrice && (
         <div className="flex items-center gap-4 mb-4">
           <span className="text-2xl font-mono">
@@ -315,14 +526,19 @@ const ForexChart: React.FC<ForexChartProps> = ({ onDataUpdate }) => {
       )}
       
       <div className="h-[400px] w-full relative" ref={chartContainerRef}>
-        {/* TradingView widget will be inserted here */}
+        {/* TradingView widget will be inserted here with SMC overlays */}
       </div>
       
       <div className="mt-4 flex flex-wrap gap-2">
-        <Button variant="outline" size="sm">SMC Levels</Button>
-        <Button variant="outline" size="sm">Order Blocks</Button>
-        <Button variant="outline" size="sm">Supply/Demand</Button>
-        <Button variant="outline" size="sm">Liquidity Sweeps</Button>
+        <Button variant="outline" size="sm" className="bg-green-100 text-green-700">
+          FVG Detection: {smcMarkers.filter(m => m.type === 'FVG').length}
+        </Button>
+        <Button variant="outline" size="sm" className="bg-blue-100 text-blue-700">
+          BOS Detection: {smcMarkers.filter(m => m.type === 'BOS').length}
+        </Button>
+        <Button variant="outline" size="sm" className="bg-purple-100 text-purple-700">
+          CHoCH Detection: {smcMarkers.filter(m => m.type === 'CHOCH').length}
+        </Button>
       </div>
     </div>
   );
