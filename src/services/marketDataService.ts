@@ -1,5 +1,5 @@
-
 import { toast } from 'sonner';
+import { analyzeSMCStrategy, SMCTradeSetup } from './smcAnalysisService';
 
 // API configuration
 const API_CONFIG = {
@@ -38,6 +38,25 @@ export interface ForexRate {
   ask: string;
   change: string;
   changeDirection: 'up' | 'down';
+}
+
+// Update the TradeSignal interface to include strategy information
+export interface TradeSignal {
+  id: number;
+  pair: string;
+  direction: 'buy' | 'sell';
+  pattern: string;
+  entry: string;
+  stopLoss: string;
+  takeProfit: string;
+  probability: 'high' | 'medium' | 'low';
+  timeframe: string;
+  signalType: 'premium' | 'discount' | 'equilibrium' | 'liquidity-grab' | 'choch';
+  analysisTimeframe: 'primary' | 'secondary' | 'lower';
+  confirmationStatus: 'confirmed' | 'pending' | 'watching';
+  fibLevel?: string;
+  strategy?: 'primary' | 'fallback';
+  confluenceScore?: number;
 }
 
 export interface TradeSignal {
@@ -454,81 +473,47 @@ export const marketDataService = {
     }
   },
   
-  // Fetch trade signals based on current market conditions
+  // Updated fetchTradeSignals to use new multi-timeframe SMC strategy
   fetchTradeSignals: async (): Promise<TradeSignal[]> => {
     try {
-      console.log('Fetching live market data for trade signals from FCS API...');
-      const allSignals: TradeSignal[] = [];
+      console.log('Fetching SMC trade signals using multi-timeframe analysis...');
       
-      // Use all pairs with premium API
-      const pairsToAnalyze = CURRENCY_PAIRS;
+      // Use the new SMC analysis service
+      const smcSetups = await analyzeSMCStrategy();
       
-      for (let i = 0; i < pairsToAnalyze.length; i++) {
-        const pair = pairsToAnalyze[i];
-        
-        try {
-          console.log(`Fetching historical data for ${pair} (${i + 1}/${pairsToAnalyze.length})...`);
-          
-          // Use the pair format directly for historical data
-          const historicalData = await fetchFromFCS('forex/history', {
-            symbol: pair,
-            period: '1H', // Use 1H for better signal detection
-            limit: '20'   // Get more data points
-          });
-          
-          if (historicalData.status && historicalData.response) {
-            // Handle both object and array response formats
-            let timeSeriesArray = [];
-            
-            if (Array.isArray(historicalData.response)) {
-              timeSeriesArray = historicalData.response;
-            } else if (typeof historicalData.response === 'object') {
-              // Convert object to array if needed
-              timeSeriesArray = Object.values(historicalData.response);
-            }
-            
-            console.log(`Received ${timeSeriesArray.length} data points for ${pair}`, timeSeriesArray);
-            
-            if (timeSeriesArray.length > 0) {
-              // Analyze the data directly using FCS response format
-              const pairSignals = analyzeMarketData(timeSeriesArray, pair);
-              allSignals.push(...pairSignals);
-              console.log(`Generated ${pairSignals.length} signals for ${pair}`);
-            } else {
-              console.warn(`No time series data available for ${pair}`);
-            }
-          } else {
-            console.warn(`No historical data received for ${pair}:`, historicalData);
-          }
-          
-          // Add small delay between requests
-          await delay(100);
-          
-        } catch (error) {
-          console.error(`Failed to fetch signals for ${pair}:`, error);
-          // Continue with other pairs
-        }
-      }
+      // Convert SMC setups to TradeSignal format
+      const signals: TradeSignal[] = smcSetups.map((setup: SMCTradeSetup) => ({
+        id: setup.id,
+        pair: setup.pair,
+        direction: setup.direction,
+        pattern: setup.pattern,
+        entry: setup.entry,
+        stopLoss: setup.stopLoss,
+        takeProfit: setup.takeProfit,
+        probability: setup.probability,
+        timeframe: setup.executionTimeframe,
+        signalType: setup.patternType === 'FVG' ? (setup.direction === 'buy' ? 'discount' : 'premium') : 'equilibrium',
+        analysisTimeframe: setup.strategy === 'primary' ? 'primary' : 'secondary',
+        confirmationStatus: setup.confirmationStatus,
+        strategy: setup.strategy,
+        confluenceScore: setup.confluenceScore
+      }));
       
-      // Sort signals by probability (high first)
-      allSignals.sort((a, b) => {
-        const probabilityOrder = { high: 1, medium: 2, low: 3 };
-        return probabilityOrder[a.probability] - probabilityOrder[b.probability];
-      });
-      
-      console.log(`Total signals generated: ${allSignals.length}`);
-      
-      if (allSignals.length > 0) {
-        toast.success(`Generated ${allSignals.length} live SMC signals from premium FCS API`);
+      if (signals.length > 0) {
+        toast.success(`Generated ${signals.length} multi-timeframe SMC signals`);
+        console.log('SMC Strategy Summary:');
+        console.log(`- Primary strategy signals: ${signals.filter(s => s.strategy === 'primary').length}`);
+        console.log(`- Fallback strategy signals: ${signals.filter(s => s.strategy === 'fallback').length}`);
+        console.log(`- High probability signals: ${signals.filter(s => s.probability === 'high').length}`);
       } else {
-        toast.error('No live trade signals generated - check console for details');
+        toast.error('No SMC trade signals generated - market conditions may not be favorable');
       }
       
-      return allSignals;
+      return signals;
       
     } catch (error) {
-      console.error('Error fetching live trade signals:', error);
-      toast.error('Failed to fetch live trade signals');
+      console.error('Error fetching SMC trade signals:', error);
+      toast.error('Failed to fetch SMC trade signals');
       return [];
     }
   },
