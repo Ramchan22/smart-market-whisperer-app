@@ -1,5 +1,8 @@
 
 import { marketDataService } from './marketDataService';
+import { getMarketStructure, detectSwingPoints, detectCHOCHandBOS, isEntryZoneRetested, Candle } from './analysis/swingAnalysis';
+import { calculateEnhancedConfluence, ScoringFactors } from './analysis/confluenceScoring';
+import { deduplicateSetups } from './analysis/setupDeduplication';
 
 export interface SMCTradeSetup {
   id: number;
@@ -37,14 +40,25 @@ const CURRENCY_PAIRS = [
   'EUR/USD', 'USD/JPY', 'GBP/USD', 'AUD/USD', 'EUR/GBP', 'EUR/CHF', 'GBP/JPY'
 ];
 
-// Helper function to analyze multi-timeframe data
+// Convert API response to Candle format
+const convertToCandles = (apiResponse: any[]): Candle[] => {
+  return apiResponse.map(c => ({
+    high: parseFloat(c.h),
+    low: parseFloat(c.l),
+    close: parseFloat(c.c),
+    open: parseFloat(c.o),
+    timestamp: parseInt(c.tm)
+  })).sort((a, b) => b.timestamp - a.timestamp);
+};
+
+// Enhanced multi-timeframe analysis with proper swing detection
 const analyzeMultiTimeframeData = async (pair: string, strategy: 'primary' | 'fallback'): Promise<SMCTradeSetup[]> => {
   const setups: SMCTradeSetup[] = [];
   const config = strategy === 'primary' ? PRIMARY_STRATEGY : FALLBACK_STRATEGY;
   
-  console.log(`Analyzing ${pair} using ${strategy} strategy...`);
+  console.log(`Analyzing ${pair} using ${strategy} strategy with swing detection...`);
   
-  // Step 1: Analyze higher timeframes for market structure
+  // Step 1: Analyze higher timeframes for market structure using swing points
   let marketStructure: 'bullish' | 'bearish' | 'neutral' = 'neutral';
   
   for (const htf of config.higherTimeframes) {
@@ -52,27 +66,15 @@ const analyzeMultiTimeframeData = async (pair: string, strategy: 'primary' | 'fa
       const htfData = await marketDataService.fetchFromFCS('forex/history', {
         symbol: pair,
         period: htf,
-        limit: '10'
+        limit: '20'
       });
       
       if (htfData.status && htfData.response) {
         const candles = Array.isArray(htfData.response) ? htfData.response : Object.values(htfData.response);
+        const processedCandles = convertToCandles(candles);
         
-        if (candles.length >= 3) {
-          const recent = candles.slice(0, 3).map((c: any) => ({
-            high: parseFloat(c.h),
-            low: parseFloat(c.l),
-            close: parseFloat(c.c),
-            open: parseFloat(c.o)
-          }));
-          
-          // Determine market structure from higher timeframe
-          if (recent[0].high > recent[1].high && recent[0].high > recent[2].high) {
-            marketStructure = 'bullish';
-          } else if (recent[0].low < recent[1].low && recent[0].low < recent[2].low) {
-            marketStructure = 'bearish';
-          }
-          
+        if (processedCandles.length >= 10) {
+          marketStructure = getMarketStructure(processedCandles);
           console.log(`${pair} ${htf} market structure: ${marketStructure}`);
           
           if (marketStructure !== 'neutral') break;
@@ -83,25 +85,89 @@ const analyzeMultiTimeframeData = async (pair: string, strategy: 'primary' | 'fa
     }
   }
   
-  // Step 2: Look for FVG and OB in analysis timeframes
+  // Step 2: Look for patterns in analysis timeframes
   if (marketStructure !== 'neutral') {
     for (const atf of config.analysisTimeframes) {
       try {
         const atfData = await marketDataService.fetchFromFCS('forex/history', {
           symbol: pair,
           period: atf,
-          limit: '20'
+          limit: '30'
         });
         
         if (atfData.status && atfData.response) {
           const candles = Array.isArray(atfData.response) ? atfData.response : Object.values(atfData.response);
+          const processedCandles = convertToCandles(candles);
           
-          if (candles.length >= 5) {
-            const patterns = await detectSMCPatterns(candles, pair, atf, marketStructure);
+          if (processedCandles.length >= 15) {
+            // Detect all pattern types
+            const fvgPatterns = await detectFVGPatterns(processedCandles, pair, atf, marketStructure);
+            const obPatterns = await detectOBPatterns(processedCandles, pair, atf, marketStructure);
+            const chochBosPatterns = detectCHOCHandBOS(processedCandles, marketStructure);
             
-            // Step 3: Create trade setups for execution timeframes
-            for (const pattern of patterns) {
+            const allPatterns = [
+              ...fvgPatterns,
+              ...obPatterns,
+              ...chochBosPatterns.map(p => ({
+                type: p.type,
+                direction: p.direction,
+                entry: p.price.toFixed(pair.includes('JPY') ? 3 : 5),
+                stopLoss: p.direction === 'buy' 
+                  ? (p.price * 0.995).toFixed(pair.includes('JPY') ? 3 : 5)
+                  : (p.price * 1.005).toFixed(pair.includes('JPY') ? 3 : 5),
+                takeProfit: p.direction === 'buy'
+                  ? (p.price * 1.01).toFixed(pair.includes('JPY') ? 3 : 5)
+                  : (p.price * 0.99).toFixed(pair.includes('JPY') ? 3 : 5),
+                probability: p.strength > 0.003 ? 'high' as const : 'medium' as const,
+                strength: p.strength
+              }))
+            ];
+            
+            // Step 3: Create trade setups with execution timeframe confirmation
+            for (const pattern of allPatterns) {
               for (const etf of config.executionTimeframes) {
+                // Fetch execution timeframe data for confirmation
+                let confirmationStatus: 'confirmed' | 'pending' | 'watching' = 'pending';
+                
+                try {
+                  const etfData = await marketDataService.fetchFromFCS('forex/history', {
+                    symbol: pair,
+                    period: etf,
+                    limit: '50'
+                  });
+                  
+                  if (etfData.status && etfData.response) {
+                    const etfCandles = Array.isArray(etfData.response) ? etfData.response : Object.values(etfData.response);
+                    const processedETFCandles = convertToCandles(etfCandles);
+                    
+                    const isRetested = isEntryZoneRetested(
+                      processedETFCandles, 
+                      parseFloat(pattern.entry), 
+                      parseFloat(pattern.stopLoss)
+                    );
+                    
+                    confirmationStatus = isRetested ? 'confirmed' : 'pending';
+                  }
+                } catch (error) {
+                  console.error(`Error fetching ${pair} ${etf} for confirmation:`, error);
+                  confirmationStatus = 'watching';
+                }
+                
+                // Calculate enhanced confluence score
+                const rewardToRisk = Math.abs(parseFloat(pattern.takeProfit) - parseFloat(pattern.entry)) / 
+                                   Math.abs(parseFloat(pattern.entry) - parseFloat(pattern.stopLoss));
+                
+                const confluenceScore = calculateEnhancedConfluence({
+                  patternStrength: pattern.strength,
+                  marketAlignment: (pattern.direction === 'buy' && marketStructure === 'bullish') ||
+                                 (pattern.direction === 'sell' && marketStructure === 'bearish'),
+                  patternType: pattern.type as 'FVG' | 'OB' | 'CHOCH' | 'BOS',
+                  probability: pattern.probability,
+                  rewardToRisk,
+                  executionConfirmed: confirmationStatus === 'confirmed',
+                  swingLevel: pattern.type === 'CHOCH' || pattern.type === 'BOS'
+                });
+                
                 const setup: SMCTradeSetup = {
                   id: Math.floor(Math.random() * 10000),
                   pair,
@@ -115,9 +181,9 @@ const analyzeMultiTimeframeData = async (pair: string, strategy: 'primary' | 'fa
                   stopLoss: pattern.stopLoss,
                   takeProfit: pattern.takeProfit,
                   probability: pattern.probability,
-                  confirmationStatus: 'confirmed',
-                  patternType: pattern.type,
-                  confluenceScore: calculateConfluenceScore(pattern, marketStructure)
+                  confirmationStatus,
+                  patternType: pattern.type as 'FVG' | 'OB' | 'BOS' | 'CHOCH',
+                  confluenceScore
                 };
                 
                 setups.push(setup);
@@ -134,97 +200,94 @@ const analyzeMultiTimeframeData = async (pair: string, strategy: 'primary' | 'fa
   return setups;
 };
 
-// Detect SMC patterns (FVG and OB)
-const detectSMCPatterns = async (candles: any[], pair: string, timeframe: string, bias: 'bullish' | 'bearish' | 'neutral') => {
+// Enhanced FVG detection
+const detectFVGPatterns = async (candles: Candle[], pair: string, timeframe: string, bias: 'bullish' | 'bearish' | 'neutral') => {
   const patterns: any[] = [];
   
-  const processedCandles = candles.slice(0, 15).map((c: any) => ({
-    high: parseFloat(c.h),
-    low: parseFloat(c.l),
-    close: parseFloat(c.c),
-    open: parseFloat(c.o),
-    timestamp: parseInt(c.tm)
-  })).sort((a, b) => b.timestamp - a.timestamp);
-  
-  // Look for Fair Value Gaps (FVG)
-  for (let i = 0; i < processedCandles.length - 2; i++) {
-    const candle1 = processedCandles[i];
-    const candle2 = processedCandles[i + 1];
-    const candle3 = processedCandles[i + 2];
+  for (let i = 0; i < candles.length - 2; i++) {
+    const candle1 = candles[i];
+    const candle2 = candles[i + 1];
+    const candle3 = candles[i + 2];
     
-    // Bullish FVG (only if market bias is bullish)
+    // Bullish FVG
     if (bias === 'bullish' && candle1.low > candle3.high) {
       const gapSize = candle1.low - candle3.high;
       const gapPercent = gapSize / candle2.close;
       
-      if (gapPercent > 0.0003) {
+      if (gapPercent > 0.0005) {
         patterns.push({
-          type: 'FVG' as const,
-          direction: 'buy' as const,
+          type: 'FVG',
+          direction: 'buy',
           entry: ((candle1.low + candle3.high) / 2).toFixed(pair.includes('JPY') ? 3 : 5),
           stopLoss: (candle3.high * 0.9995).toFixed(pair.includes('JPY') ? 3 : 5),
-          takeProfit: (candle1.low * 1.002).toFixed(pair.includes('JPY') ? 3 : 5),
-          probability: gapPercent > 0.001 ? 'high' as const : 'medium' as const,
+          takeProfit: (candle1.low * 1.003).toFixed(pair.includes('JPY') ? 3 : 5),
+          probability: gapPercent > 0.001 ? 'high' : 'medium',
           strength: gapPercent
         });
       }
     }
     
-    // Bearish FVG (only if market bias is bearish)
+    // Bearish FVG
     if (bias === 'bearish' && candle1.high < candle3.low) {
       const gapSize = candle3.low - candle1.high;
       const gapPercent = gapSize / candle2.close;
       
-      if (gapPercent > 0.0003) {
+      if (gapPercent > 0.0005) {
         patterns.push({
-          type: 'FVG' as const,
-          direction: 'sell' as const,
+          type: 'FVG',
+          direction: 'sell',
           entry: ((candle1.high + candle3.low) / 2).toFixed(pair.includes('JPY') ? 3 : 5),
           stopLoss: (candle3.low * 1.0005).toFixed(pair.includes('JPY') ? 3 : 5),
-          takeProfit: (candle1.high * 0.998).toFixed(pair.includes('JPY') ? 3 : 5),
-          probability: gapPercent > 0.001 ? 'high' as const : 'medium' as const,
+          takeProfit: (candle1.high * 0.997).toFixed(pair.includes('JPY') ? 3 : 5),
+          probability: gapPercent > 0.001 ? 'high' : 'medium',
           strength: gapPercent
         });
       }
     }
   }
   
-  // Look for Order Blocks (OB)
-  for (let i = 0; i < processedCandles.length - 1; i++) {
-    const candle = processedCandles[i];
+  return patterns;
+};
+
+// Enhanced Order Block detection
+const detectOBPatterns = async (candles: Candle[], pair: string, timeframe: string, bias: 'bullish' | 'bearish' | 'neutral') => {
+  const patterns: any[] = [];
+  
+  for (let i = 0; i < candles.length - 1; i++) {
+    const candle = candles[i];
     const bodySize = Math.abs(candle.close - candle.open);
     const totalRange = candle.high - candle.low;
     const bodyRatio = totalRange > 0 ? bodySize / totalRange : 0;
     
-    // Bullish Order Block (only if market bias is bullish)
-    if (bias === 'bullish' && candle.close > candle.open && bodyRatio > 0.6) {
+    // Bullish Order Block
+    if (bias === 'bullish' && candle.close > candle.open && bodyRatio > 0.7) {
       const strength = bodySize / candle.close;
       
-      if (strength > 0.001) {
+      if (strength > 0.002) {
         patterns.push({
-          type: 'OB' as const,
-          direction: 'buy' as const,
+          type: 'OB',
+          direction: 'buy',
           entry: candle.open.toFixed(pair.includes('JPY') ? 3 : 5),
-          stopLoss: (candle.low * 0.999).toFixed(pair.includes('JPY') ? 3 : 5),
-          takeProfit: (candle.high * 1.003).toFixed(pair.includes('JPY') ? 3 : 5),
-          probability: strength > 0.003 ? 'high' as const : 'medium' as const,
+          stopLoss: (candle.low * 0.998).toFixed(pair.includes('JPY') ? 3 : 5),
+          takeProfit: (candle.high * 1.005).toFixed(pair.includes('JPY') ? 3 : 5),
+          probability: strength > 0.004 ? 'high' : 'medium',
           strength
         });
       }
     }
     
-    // Bearish Order Block (only if market bias is bearish)
-    if (bias === 'bearish' && candle.close < candle.open && bodyRatio > 0.6) {
+    // Bearish Order Block
+    if (bias === 'bearish' && candle.close < candle.open && bodyRatio > 0.7) {
       const strength = bodySize / candle.close;
       
-      if (strength > 0.001) {
+      if (strength > 0.002) {
         patterns.push({
-          type: 'OB' as const,
-          direction: 'sell' as const,
+          type: 'OB',
+          direction: 'sell',
           entry: candle.open.toFixed(pair.includes('JPY') ? 3 : 5),
-          stopLoss: (candle.high * 1.001).toFixed(pair.includes('JPY') ? 3 : 5),
-          takeProfit: (candle.low * 0.997).toFixed(pair.includes('JPY') ? 3 : 5),
-          probability: strength > 0.003 ? 'high' as const : 'medium' as const,
+          stopLoss: (candle.high * 1.002).toFixed(pair.includes('JPY') ? 3 : 5),
+          takeProfit: (candle.low * 0.995).toFixed(pair.includes('JPY') ? 3 : 5),
+          probability: strength > 0.004 ? 'high' : 'medium',
           strength
         });
       }
@@ -234,42 +297,14 @@ const detectSMCPatterns = async (candles: any[], pair: string, timeframe: string
   return patterns;
 };
 
-// Calculate confluence score based on multiple factors
-const calculateConfluenceScore = (pattern: any, marketStructure: 'bullish' | 'bearish' | 'neutral'): number => {
-  let score = 0;
-  
-  // Base score for pattern strength
-  score += pattern.strength * 1000;
-  
-  // Bonus for alignment with market structure
-  if ((pattern.direction === 'buy' && marketStructure === 'bullish') ||
-      (pattern.direction === 'sell' && marketStructure === 'bearish')) {
-    score += 20;
-  }
-  
-  // Bonus for high probability patterns
-  if (pattern.probability === 'high') {
-    score += 15;
-  } else if (pattern.probability === 'medium') {
-    score += 10;
-  }
-  
-  // Bonus for FVG patterns (considered more reliable)
-  if (pattern.type === 'FVG') {
-    score += 10;
-  }
-  
-  return Math.min(100, Math.round(score));
-};
-
-// Main analysis function
+// Main analysis function with all improvements
 export const analyzeSMCStrategy = async (): Promise<SMCTradeSetup[]> => {
-  console.log('Starting multi-timeframe SMC analysis...');
+  console.log('Starting enhanced multi-timeframe SMC analysis with swing detection...');
   const allSetups: SMCTradeSetup[] = [];
   
   for (const pair of CURRENCY_PAIRS) {
     try {
-      console.log(`Analyzing ${pair}...`);
+      console.log(`Analyzing ${pair} with enhanced SMC logic...`);
       
       // Try primary strategy first
       const primarySetups = await analyzeMultiTimeframeData(pair, 'primary');
@@ -290,16 +325,26 @@ export const analyzeSMCStrategy = async (): Promise<SMCTradeSetup[]> => {
       }
       
       // Add delay between pairs to avoid rate limiting
-      await new Promise(resolve => setTimeout(resolve, 200));
+      await new Promise(resolve => setTimeout(resolve, 300));
       
     } catch (error) {
       console.error(`Error analyzing ${pair}:`, error);
     }
   }
   
-  // Sort by confluence score (highest first)
-  allSetups.sort((a, b) => b.confluenceScore - a.confluenceScore);
+  // Deduplicate similar setups
+  const uniqueSetups = deduplicateSetups(allSetups);
   
-  console.log(`Total SMC setups found: ${allSetups.length}`);
-  return allSetups.slice(0, 20); // Return top 20 setups
+  // Sort by confluence score (highest first)
+  uniqueSetups.sort((a, b) => b.confluenceScore - a.confluenceScore);
+  
+  console.log(`Enhanced SMC analysis complete: ${uniqueSetups.length} unique setups found`);
+  console.log(`Pattern distribution:`, {
+    FVG: uniqueSetups.filter(s => s.patternType === 'FVG').length,
+    OB: uniqueSetups.filter(s => s.patternType === 'OB').length,
+    CHOCH: uniqueSetups.filter(s => s.patternType === 'CHOCH').length,
+    BOS: uniqueSetups.filter(s => s.patternType === 'BOS').length
+  });
+  
+  return uniqueSetups.slice(0, 15); // Return top 15 setups
 };

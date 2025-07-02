@@ -18,7 +18,7 @@ export interface TradeSignal {
   takeProfit: string;
   probability: 'high' | 'medium' | 'low';
   timeframe: string;
-  signalType: 'premium' | 'discount' | 'equilibrium' | 'liquidity-grab' | 'choch';
+  signalType: 'premium' | 'discount' | 'equilibrium' | 'liquidity-grab' | 'choch' | 'bos';
   analysisTimeframe: 'primary' | 'secondary' | 'lower';
   confirmationStatus: 'confirmed' | 'pending' | 'watching';
   fibLevel?: string;
